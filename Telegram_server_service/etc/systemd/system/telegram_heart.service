@@ -1,0 +1,12 @@
+[Unit]
+Description=Heart beacon telegram message
+After=network.target
+Wants=network.target
+
+[Service]
+ExecStart=/usr/local/bin/mqtt_to_telegram.sh
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
