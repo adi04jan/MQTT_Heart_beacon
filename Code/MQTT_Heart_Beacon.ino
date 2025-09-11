@@ -9,10 +9,11 @@
 #include "esp_sleep.h"
 #include "esp_system.h"
 #include "credential.h"
+#include <ArduinoJson.h>
 
 //#define TEST_ADC 1
 #define DUMMY_VOLTAGE 5096
-#define CURRENT_FIRMWARE_VERSION "0.0.4"  // Change this as needed
+#define CURRENT_FIRMWARE_VERSION "0.0.7"  // Change this as needed
 #define USER_BTN 0
 #define LED_PIN 2
 #define OTA_PIN 10
@@ -27,7 +28,7 @@
 
 WiFiClient espClient;
 PubSubClient client(espClient);
-Adafruit_NeoPixel strip(PIXEL_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel strip(PIXEL_COUNT, LED_PIN, NEO_GRB + NEO_KHZ400);
 
 const uint8_t total_ssid_count = sizeof(ssids) / sizeof(ssids[0]);
 bool WIFI_STATUS = false;
@@ -306,8 +307,9 @@ int battery_level_show() {
 
 void no_network() {
   static int ret = 0;
+  static int count = 0;
   Serial.println("No WiFi network found, entering contionus scan");
-  while (true) {
+  while (count++ < 10) {
     uint32_t color = strip.Color(0, 0, 100);  // Gray-white
     heartbeat_effect(color, 3, 10);
     ret = connect_wifi();
@@ -317,6 +319,7 @@ void no_network() {
     }
     Serial.println("Failed to connect to any wifi network");
   }
+  ESP.restart();
 }
 
 void network_connected() {
@@ -349,6 +352,8 @@ void low_batt_notify() {
     Serial.print("Low Battery Detected: ");
     Serial.println(batt_voltage);
 
+    publishMqttMessage(MQTT_TOPIC, MQTT_MSG_4);  // send notify
+
     for (int i = 0; i < 3; i++) {
       strip.setPixelColor(0, strip.Color(200, 0, 0));
       strip.show();
@@ -370,19 +375,60 @@ void callback(char *topic, byte *payload, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
+  char jsonBuffer[256];
+  if (length >= sizeof(jsonBuffer)) length = sizeof(jsonBuffer) - 1;  // prevent overflow
+  memcpy(jsonBuffer, payload, length);
+  jsonBuffer[length] = '\0';
 
-  // Switch on the LED if an 1 was received as first character
-  if ((char)payload[0] == '1') {
-    uint32_t color = strip.Color(250, 0, 0);  // Gray-white
+  Serial.println(jsonBuffer);
+
+  // Parse JSON
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, jsonBuffer);
+
+  if (error) {
+    Serial.print("deserializeJson() failed: ");
+    Serial.println(error.c_str());
+    return;
+  }
+
+  const char *msg = doc["message"];
+  if (!msg) {
+    Serial.println("No 'message' field found in JSON.");
+    return;
+  }
+
+  Serial.print("Parsed message: ");
+  Serial.println(msg);
+
+  if (strcmp(msg, MQTT_MSG_1) == 0) {
+    uint32_t color = strip.Color(250, 0, 0);  // Red
+    heartbeat_effect(color, 3, 10);
+  } else if (strcmp(msg, MQTT_MSG_2) == 0) {
+    uint32_t color = strip.Color(0, 250, 0);  // Green
     heartbeat_effect(color, 3, 10);
   } else {
-    uint32_t color = strip.Color(0, 250, 0);  // Gray-white
-    heartbeat_effect(color, 3, 10);
+    Serial.println("Unknown message received, no LED action.");
   }
+}
+
+void publishMqttMessage(const char *topic, const char *message) {
+  float batt_voltage = check_batt_voltage() / 1000.0;  // assuming check_batt_voltage returns millivolts
+  StaticJsonDocument<128> doc;
+  char buffer[128];
+
+  String chipmac = WiFi.macAddress();  // Get ESP MAC address
+  doc["id"] = chipmac;
+  doc["message"] = message;
+  doc["volt"] = batt_voltage;
+
+  size_t n = serializeJson(doc, buffer);
+
+  // Publish JSON to MQTT
+  client.publish(topic, buffer, n);
+
+  Serial.print("[MQTT] Sent: ");
+  Serial.println(buffer);
 }
 
 void reconnect() {
@@ -397,9 +443,9 @@ void reconnect() {
     if (client.connect(clientId.c_str(), MQTT_USER, MQTT_PASS)) {
       Serial.println("connected");
       // Once connected, publish an announcement...
-      client.publish("heart", "hello world");
+      publishMqttMessage(MQTT_TOPIC, MQTT_MSG_2);  // ONLINE
       // ... and resubscribe
-      client.subscribe("heart");
+      client.subscribe(MQTT_TOPIC);
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -419,7 +465,8 @@ int check_user_button() {
       colorWipe(strip.Color(0, 0, 0), 100);
       return 0;
     }
-    client.publish("heart", "1");
+
+    publishMqttMessage(MQTT_TOPIC, MQTT_MSG_1);  // send notify
   }
   return 0;
 }
@@ -484,6 +531,7 @@ void setup() {
 
 void loop() {
   static int batt_time = 0;
+  static int batt_push_time = 0;
   if (!client.connected()) {
     reconnect();
   }
@@ -492,30 +540,12 @@ void loop() {
   if (batt_time == 1500) {
     low_batt_notify();
     batt_time = 0;
+    batt_push_time++;
+  }
+  if (batt_push_time == 120) {
+    publishMqttMessage(MQTT_TOPIC, MQTT_MSG_3);
+    batt_push_time = 0;
   }
   batt_time++;
   delay(10);
-}
-
-void rainbow(int wait) {
-  // Hue of first pixel runs 3 complete loops through the color wheel.
-  // Color wheel has a range of 65536 but it's OK if we roll over, so
-  // just count from 0 to 3*65536. Adding 256 to firstPixelHue each time
-  // means we'll make 3*65536/256 = 768 passes through this outer loop:
-  for (long firstPixelHue = 0; firstPixelHue < 3 * 65536; firstPixelHue += 256) {
-    for (int i = 0; i < strip.numPixels(); i++) {  // For each pixel in strip...
-      // Offset pixel hue by an amount to make one full revolution of the
-      // color wheel (range of 65536) along the length of the strip
-      // (strip.numPixels() steps):
-      int pixelHue = firstPixelHue + (i * 65536L / strip.numPixels());
-      // strip.ColorHSV() can take 1 or 3 arguments: a hue (0 to 65535) or
-      // optionally add saturation and value (brightness) (each 0 to 255).
-      // Here we're using just the single-argument hue variant. The result
-      // is passed through strip.gamma32() to provide 'truer' colors
-      // before assigning to each pixel:
-      strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(pixelHue)));
-    }
-    strip.show();  // Update strip with new contents
-    delay(wait);   // Pause for a moment
-  }
 }

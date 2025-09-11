@@ -1,5 +1,10 @@
-#define MQTT_USER "test"        // Change this as needed
-#define MQTT_PASS "12345678"  // Change this as needed
+#define MQTT_USER "USER_NAME"        // Change this as needed
+#define MQTT_PASS "P@SSW0RD"  // Change this as needed
+#define MQTT_TOPIC "/topic/subtopic/"  // Change this as needed
+#define MQTT_MSG_1 "Miss you"  // Change this as needed
+#define MQTT_MSG_2 "Online"  // Change this as needed
+#define MQTT_MSG_3 "BATT_STATUS"  // Change this as needed
+#define MQTT_MSG_4 "DEEP SLEEP"  // Change this as needed
 
 const char *mqtt_server = "192.168.29.250";
 const int mqtt_port = 1883;
