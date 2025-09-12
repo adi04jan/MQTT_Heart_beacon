@@ -13,14 +13,14 @@
 
 //#define TEST_ADC 1
 #define DUMMY_VOLTAGE 5096
-#define CURRENT_FIRMWARE_VERSION "0.0.7"  // Change this as needed
+#define CURRENT_FIRMWARE_VERSION "0.0.8"  // Change this as needed
 #define USER_BTN 0
 #define LED_PIN 2
 #define OTA_PIN 10
 #define BATT_PIN A3
 #define PIXEL_COUNT 9
-#define MIN_VOLTAGE 3.2
-#define LOW_BATT_VOLTAGE 3.4
+#define MIN_VOLTAGE 3.4
+#define LOW_BATT_VOLTAGE 3.5
 #define MAX_VOLTAGE 4.2
 #define WAKEUP_THRESHOLD_VOLTAGE 3.5
 #define WIFI_TIMEOUT 60
@@ -327,6 +327,14 @@ void network_connected() {
   heartbeat_effect(color, 3, 10);               // 3 pulses, smooth 20ms fade step
 }
 
+void go_to_sleep() {
+  publishMqttMessage(MQTT_TOPIC, MQTT_MSG_4);                                  // send notify
+  esp_deep_sleep_enable_gpio_wakeup(1 << USER_BTN, ESP_GPIO_WAKEUP_GPIO_LOW);  // Wake on LOW (button press)
+  // Go into deep sleep
+  Serial.println("Going for deep sleep");
+  esp_deep_sleep_start();
+}
+
 void low_batt_notify() {
   float batt_voltage = check_batt_voltage() / 1000.0;  // assuming check_batt_voltage returns millivolts
 
@@ -352,8 +360,6 @@ void low_batt_notify() {
     Serial.print("Low Battery Detected: ");
     Serial.println(batt_voltage);
 
-    publishMqttMessage(MQTT_TOPIC, MQTT_MSG_4);  // send notify
-
     for (int i = 0; i < 3; i++) {
       strip.setPixelColor(0, strip.Color(200, 0, 0));
       strip.show();
@@ -362,11 +368,7 @@ void low_batt_notify() {
       strip.show();
       delay(500);
     }
-    esp_deep_sleep_enable_gpio_wakeup(1 << USER_BTN, ESP_GPIO_WAKEUP_GPIO_LOW);  // Wake on LOW (button press)
-
-    // Go into deep sleep
-    Serial.println("Going for deep sleep");
-    esp_deep_sleep_start();
+    go_to_sleep();
   }
   return;
 }
@@ -407,9 +409,20 @@ void callback(char *topic, byte *payload, unsigned int length) {
   } else if (strcmp(msg, MQTT_MSG_2) == 0) {
     uint32_t color = strip.Color(0, 250, 0);  // Green
     heartbeat_effect(color, 3, 10);
+  } else if (strcmp(msg, MQTT_MSG_SORRY_1) == 0 || strcmp(msg, MQTT_MSG_SORRY_2) == 0) {
+    uint32_t color = strip.Color(235, 161, 23);  // Orange
+    heartbeat_effect(color, 3, 10);
+  } else if (strcmp(msg, MQTT_MSG_ANNOY_1) == 0 || strcmp(msg, MQTT_MSG_ANNOY_2) == 0) {
+    uint32_t color = strip.Color(23, 231, 235);  // Blue
+    heartbeat_effect(color, 3, 10);
+  } else if (strcmp(msg, MQTT_GO_SLEEP) == 0) {
+    uint32_t color = strip.Color(128, 37, 247);  // Green
+    heartbeat_effect(color, 1, 5);
+    go_to_sleep();
   } else {
     Serial.println("Unknown message received, no LED action.");
   }
+  return;
 }
 
 void publishMqttMessage(const char *topic, const char *message) {

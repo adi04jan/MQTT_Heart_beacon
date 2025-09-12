@@ -5,6 +5,11 @@
 #define MQTT_MSG_2 "Online"  // Change this as needed
 #define MQTT_MSG_3 "BATT_STATUS"  // Change this as needed
 #define MQTT_MSG_4 "DEEP SLEEP"  // Change this as needed
+#define MQTT_GO_SLEEP "GO_DEEP_SLEEP"  // Change this as needed
+#define MQTT_MSG_SORRY_1 "Sorry"  // Change this as needed
+#define MQTT_MSG_SORRY_2 "sorry"  // Change this as needed
+#define MQTT_MSG_ANNOY_1 "Annoy"  // Change this as needed
+#define MQTT_MSG_ANNOY_2 "annoy"  // Change this as needed
 
 const char *mqtt_server = "192.168.29.250";
 const int mqtt_port = 1883;
