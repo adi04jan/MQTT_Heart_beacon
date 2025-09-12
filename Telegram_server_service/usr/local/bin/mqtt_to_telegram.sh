@@ -17,6 +17,9 @@ MQTT_MSG_1="Miss you"
 MQTT_MSG_2="Online"
 MQTT_MSG_3="LOW BATT"
 MQTT_MSG_4="DEEP SLEEP"
+MQTT_GO_SLEEP="GO_DEEP_SLEEP"
+MQTT_MSG_SORRY="Sorry"
+MQTT_MSG_ANNOY="Annoy"
 
 POLL_INTERVAL=5
 OFFSET=0
@@ -92,10 +95,42 @@ telegram_poller() {
                     echo "[TELEGRAM] Message: $message_text"
                     lower_msg=$(echo "$message_text" | tr '[:upper:]' '[:lower:]')
 
-                    if [[ "$lower_msg" =~ ^miss ]]; then
+                    if [[ "$lower_msg" =~ ^miss || "$lower_msg" =~ ^annoy || "$lower_msg" =~ ^sorry || "$lower_msg" =~ ^go_deep_sleep ]]; then
+                        local send_revert="false"
+                        local send_forward="false"
+                        case "$lower_msg" in
+                            *miss*)
+                                message_value="$MQTT_MSG_1"
+                                send_revert="true"
+                                send_forward="true"
+                                revert_message="is missing you ❤️"
+                                ;;
+                            *annoy*)
+                                message_value="$MQTT_MSG_ANNOY"
+                                send_revert="true"
+                                send_forward="true"
+                                revert_message="is annoyed at you 😡"
+                                ;;
+                            *sorry*)
+                                message_value="$MQTT_MSG_SORRY"
+                                send_revert="true"
+                                send_forward="true"
+                                revert_message="is saying sorry 😔"
+                                ;;
+                            *go_deep_sleep*)
+                                message_value="$MQTT_GO_SLEEP"
+                                send_revert="true"
+                                send_forward="false"
+                
+                                ;;
+                            *)
+                                message_value=""
+                                ;;
+                        esac
+
                         json_payload=$(jq -nc \
                             --arg id "$user_first" \
-                            --arg message "$MQTT_MSG_1" \
+                            --arg message "$message_value" \
                             --arg raw "$message_text" \
                             --arg user "$user_id" \
                             '{id:$id, message:$message, raw:$raw, user:$user}')
@@ -106,13 +141,14 @@ telegram_poller() {
                            if [[ "$uid" == "$user_id" ]]; then
                                 # Sender gets confirmation
                                 for rid in "${!USERS[@]}"; do
-                                    if [[ "$rid" != "$user_id" ]]; then
+                                    if [[ "$rid" != "$user_id" && "$send_revert" == "true" ]]; then
                                         send_telegram_message "$uid" "❤️📡 Message sent to ${USERS[$rid]}"
                                     fi
                                 done
                             else
-                                # Receiver gets info
-                                send_telegram_message "$uid" "❤️ ${USERS[$user_id]} is missing you"
+                                if [[ "$send_forward" == "true" ]]; then
+                                    send_telegram_message "$uid" "❤️ ${USERS[$user_id]} $revert_message"
+                                fi
                             fi
                         done
                     fi
