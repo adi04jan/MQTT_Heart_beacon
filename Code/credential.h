@@ -10,6 +10,8 @@
 #define MQTT_MSG_SORRY_2 "sorry"  // Change this as needed
 #define MQTT_MSG_ANNOY_1 "Annoy"  // Change this as needed
 #define MQTT_MSG_ANNOY_2 "annoy"  // Change this as needed
+#define MQTT_MSG_ONLINE_1 "Details"  // Change this as needed
+#define MQTT_MSG_ONLINE_2 "details"  // Change this as needed
 
 const char *mqtt_server = "192.168.29.250";
 const int mqtt_port = 1883;

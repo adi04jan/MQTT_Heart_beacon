@@ -20,8 +20,9 @@ MQTT_MSG_4="DEEP SLEEP"
 MQTT_GO_SLEEP="GO_DEEP_SLEEP"
 MQTT_MSG_SORRY="Sorry"
 MQTT_MSG_ANNOY="Annoy"
+MQTT_MSG_ONLINE="Details"
 
-POLL_INTERVAL=5
+POLL_INTERVAL=10
 OFFSET=0
 
 # === FUNCTIONS ===
@@ -95,7 +96,7 @@ telegram_poller() {
                     echo "[TELEGRAM] Message: $message_text"
                     lower_msg=$(echo "$message_text" | tr '[:upper:]' '[:lower:]')
 
-                    if [[ "$lower_msg" =~ ^miss || "$lower_msg" =~ ^annoy || "$lower_msg" =~ ^sorry || "$lower_msg" =~ ^go_deep_sleep ]]; then
+                    if [[ "$lower_msg" =~ ^miss || "$lower_msg" =~ ^annoy || "$lower_msg" =~ ^sorry || "$lower_msg" =~ ^go_deep_sleep || "$lower_msg" =~ ^details ]]; then
                         local send_revert="false"
                         local send_forward="false"
                         case "$lower_msg" in
@@ -121,7 +122,11 @@ telegram_poller() {
                                 message_value="$MQTT_GO_SLEEP"
                                 send_revert="true"
                                 send_forward="false"
-                
+                                ;;
+                            *details*)
+                                message_value="$MQTT_MSG_ONLINE"
+                                send_revert="true"
+                                send_forward="false"
                                 ;;
                             *)
                                 message_value=""
