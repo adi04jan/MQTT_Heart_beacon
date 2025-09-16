@@ -13,15 +13,15 @@
 
 //#define TEST_ADC 1
 #define DUMMY_VOLTAGE 5096
-#define CURRENT_FIRMWARE_VERSION "0.0.8"  // Change this as needed
+#define CURRENT_FIRMWARE_VERSION "0.0.9"  // Change this as needed
 #define USER_BTN 0
 #define LED_PIN 2
 #define OTA_PIN 10
 #define BATT_PIN A3
 #define PIXEL_COUNT 9
-#define MIN_VOLTAGE 3.4
-#define LOW_BATT_VOLTAGE 3.5
-#define MAX_VOLTAGE 4.2
+#define MIN_VOLTAGE 3.3
+#define LOW_BATT_VOLTAGE 3.45
+#define MAX_VOLTAGE 4.15
 #define WAKEUP_THRESHOLD_VOLTAGE 3.5
 #define WIFI_TIMEOUT 60
 
@@ -32,6 +32,8 @@ Adafruit_NeoPixel strip(PIXEL_COUNT, LED_PIN, NEO_GRB + NEO_KHZ400);
 
 const uint8_t total_ssid_count = sizeof(ssids) / sizeof(ssids[0]);
 bool WIFI_STATUS = false;
+bool STATUS_FLAG = true;
+bool SLEEP_FLAG = false;
 static const char *server_certificate = "-----BEGIN CERTIFICATE-----\n"
                                         "MIIEkjCCA3qgAwIBAgIQCgFBQgAAAVOFc2oLheynCDANBgkqhkiG9w0BAQsFADA/\n"
                                         "MSQwIgYDVQQKExtEaWdpdGFsIFNpZ25hdHVyZSBUcnVzdCBDby4xFzAVBgNVBAMT\n"
@@ -328,7 +330,8 @@ void network_connected() {
 }
 
 void go_to_sleep() {
-  publishMqttMessage(MQTT_TOPIC, MQTT_MSG_4);                                  // send notify
+  publishMqttMessage(MQTT_TOPIC, MQTT_MSG_4);
+  delay(1000);                                                                 // send notify
   esp_deep_sleep_enable_gpio_wakeup(1 << USER_BTN, ESP_GPIO_WAKEUP_GPIO_LOW);  // Wake on LOW (button press)
   // Go into deep sleep
   Serial.println("Going for deep sleep");
@@ -371,6 +374,17 @@ void low_batt_notify() {
     go_to_sleep();
   }
   return;
+}
+
+String get_connected_wifi_info() {
+  if (WiFi.status() == WL_CONNECTED) {
+    String ssid = WiFi.SSID();
+    long rssi = WiFi.RSSI();
+    String wifi_info = "SSID: " + ssid + " | RSSI: " + String(rssi) + " dBm";
+    return wifi_info;
+  } else {
+    return "Not connected to any WiFi.";
+  }
 }
 
 void callback(char *topic, byte *payload, unsigned int length) {
@@ -418,7 +432,9 @@ void callback(char *topic, byte *payload, unsigned int length) {
   } else if (strcmp(msg, MQTT_GO_SLEEP) == 0) {
     uint32_t color = strip.Color(128, 37, 247);  // Green
     heartbeat_effect(color, 1, 5);
-    go_to_sleep();
+    SLEEP_FLAG = true;
+  } else if (strcmp(msg, MQTT_MSG_ONLINE_1) == 0 || strcmp(msg, MQTT_MSG_ONLINE_2) == 0) {
+    STATUS_FLAG = true;
   } else {
     Serial.println("Unknown message received, no LED action.");
   }
@@ -558,6 +574,18 @@ void loop() {
   if (batt_push_time == 120) {
     publishMqttMessage(MQTT_TOPIC, MQTT_MSG_3);
     batt_push_time = 0;
+  }
+  if (STATUS_FLAG == true) {
+    STATUS_FLAG=false;
+    String wifi_info = get_connected_wifi_info();
+    String final_msg = String(CURRENT_FIRMWARE_VERSION) + " | " + wifi_info;
+    Serial.print("msg : ");
+    Serial.println(final_msg);
+    publishMqttMessage(MQTT_TOPIC, final_msg.c_str());
+  }
+  if (SLEEP_FLAG == true) {
+    SLEEP_FLAG=false;
+    go_to_sleep();
   }
   batt_time++;
   delay(10);
