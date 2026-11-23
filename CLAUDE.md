@@ -123,7 +123,8 @@ MQTT buffer is 1024 B (`setBufferSize`); longer bridge messages are still droppe
   hearts to be queued. A `GO_DEEP_SLEEP` within 60 s of connect is treated as a stale queued command and ignored;
   the beacon's own `Online` echo plays no effect.
 
-Pins: button GPIO0, NeoPixel data GPIO2 (`NEO_KHZ400`), battery ADC `A3` (GPIO3) through a 1:2 divider,
+Pins: button GPIO0, NeoPixel data GPIO2 (`NEO_KHZ400` is ignored by Adafruit NeoPixel 1.15 on core 3.x: it
+always sends 800 kHz-class bits, which is what works on these LEDs), battery ADC `A3` (GPIO3) through a 1:2 divider,
 GPIO10 free (the plan's LED power-switch pin).
 
 Battery: `check_batt_voltage()` keeps a 10-sample moving window shared by **every** caller (each call shifts
@@ -171,6 +172,12 @@ the water-tank sensor system**: broker changes go through the user, keep that sy
 `systemctl reload mosquitto` over a restart. Mosquitto 1.6.9; since 2026-11-23 it has
 `/etc/mosquitto/conf.d/heart-queue.conf` = `queue_qos0_messages true`, so QoS 0 messages are queued for offline
 persistent sessions (only the beacons use `cleanSession=false`). Rollback: remove that file and reload.
+
+v2 never touches that shared broker: it runs its **own** Mosquitto 1.6.9 instance (`deploy/mosquitto-hb.conf`,
+`/etc/mosquitto-hb/`, unit `hb-mosquitto`) with TLS 8883 and the router on loopback **1884** (1883 is taken), auth
+via a server-written `password_file` (mosquitto_passwd 1.6 format) + `pattern` ACL. One `hb-server` process serves
+the API (8443), admin (127.0.0.1:8444) and the router. Deploy needs from the user: public IP, port forwards
+8883/8443, Python >= 3.11 via uv (Ubuntu 20.04 ships 3.8), `age`, the beacon dids. Not deployed yet.
 
 ## Bridge service (server)
 

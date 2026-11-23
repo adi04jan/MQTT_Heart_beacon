@@ -68,14 +68,16 @@ Tick a box only after its bench check passed.
 - [x] Check stock bootloader rollback support (sdkconfig read): `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`; v2 must mark itself valid (plan, Risks)
 
 ### M1 firmware core, radios off (ESP-IDF)
-- [ ] Pure `hb_core`: button gestures, LED effects, battery w/ hysteresis, schedule, power policy + host tests
-- [ ] Drivers: RMT LEDs, ADC, sleep, NVS; PM + tickless in `sdkconfig.defaults`
-- [ ] Bench: measured light/deep-sleep current recorded in the plan
+- [x] Pure `hb_core`: button gestures, LED effects, battery w/ hysteresis, schedule, power policy + host tests (31 + 10, 2026-11-23)
+- [x] Drivers: RMT LEDs, ADC, sleep, NVS; PM + tickless in `sdkconfig.defaults`; arduino 4 MB partitions; rollback mark-valid; IDF build 245,424 B (19 % of gate)
+- [ ] Bench (needs COM6 on USB + current meter + user OK): light/deep-sleep current, button + timer wake, LED colours/timing
 
-### M2 server MVP (VPS, public IP)
-- [ ] Private CA + leaf cert with IP SAN; Mosquitto 8883 + dynsec per-client roles
-- [ ] FastAPI + SQLite: device registry, claim, signed JSON config, router (queue, dedupe, receipts)
-- [ ] Minimal admin (devices, config edit) on 127.0.0.1 via SSH tunnel; backups
+### M2 server MVP (home server, public IP)
+- [x] Private CA + leaf cert with IP SAN (`deploy/mkca.sh`, chain + TLS handshake checked locally); separate Mosquitto 1.6.9 instance, password_file + pattern ACL (replaces dynsec)
+- [x] FastAPI + SQLite: device registry, claim (admin-assigned owner only), signed JSON config, router (queue, dedupe, receipts, coalesce) - 177 tests
+- [x] Minimal admin (devices, users, register/assign, config edit) on 127.0.0.1; `backup.sh` restore checked in WSL (age branch untested)
+- [ ] Real-broker ACL test (skipped: Docker not running)
+- [ ] Deploy (needs user: public IP, port forwards 8883/8443, Python >= 3.11 via uv, `age`, beacon dids)
 - [ ] Bench: TLS fails without CA; two simulators exchange a heart over the public IP
 
 ### M3 firmware WiFi + MQTT
@@ -89,9 +91,10 @@ Tick a box only after its bench check passed.
 - [ ] Bench: 20 forced handovers, no lost/doubled heart; NEAR current measured
 
 ### M5 Android app MVP
-- [ ] `:core` relay/handover logic + codec tests (can start right after M0)
-- [ ] Foreground service (`connectedDevice`), CDM presence, autoConnect GATT, MQTT, boot restart
-- [ ] Screens: Login, Home (beacon card, Heart/Sorry/Annoy, events), Add device
+- [x] `:core` relay/handover logic + codec tests (30 tests, 2026-11-23)
+- [~] Foreground service (`connectedDevice`), CDM presence, autoConnect GATT, MQTT, boot restart: written, compiles, not run on hardware
+- [~] Screens: all five on fakes (light + dark screenshots); real repo not wired; fix: bottom content sits under the nav bar (missing navigationBars insets)
+- [ ] Protocol round 2: apply the contract clarifications proposed by the fw/server/app tracks (phone `resp` ack for relayed uplinks, relay size cap, drop `net.wifi` from cfg, lowercase state names, schedule past midnight, `mood.from` = display name, signature format, Mosquitto 1.6.9 ACL text)
 - [ ] Bench: reconnect p95 < 10 s; force-stop + phone reboot recovery; overnight Doze delay log
 
 ### M6 schedule, smart power, settings, admin
