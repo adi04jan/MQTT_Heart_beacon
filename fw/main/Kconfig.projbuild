@@ -1,0 +1,40 @@
+menu "Heart Beacon"
+
+    config HB_BTN_GPIO
+        int "Button GPIO (active low, internal pull-up)"
+        range 0 5
+        default 0
+        help
+            Must be one of GPIO0-5: only those can wake the ESP32-C3 from deep sleep.
+
+    config HB_LED_PWR_GPIO
+        int "LED rail load-switch GPIO, -1 = none"
+        range -1 21
+        default -1
+        help
+            -1 on carrier rev A (LEDs always powered). Rev B drives a high-side switch from GPIO10 (plan M9);
+            that driver is not written yet, so any other value fails the build.
+
+    config HB_HAS_XTAL32K
+        bool "32 kHz crystal fitted"
+        default n
+        help
+            The SuperMini has none. A crystal occupies GPIO0/1 and needs RTC_CLK_SRC_EXT_CRYS.
+
+    config HB_LED_WS2811_400K
+        bool "LED timing: true 400 kHz (WS2811)"
+        default n
+        help
+            n: the waveform v1 actually sends. v1 asks Adafruit NeoPixel for NEO_KHZ400, but on
+            arduino-esp32 3.x (IDF 5) the library's esp.c ignores the speed flag and always sends
+            0.4/0.8 us symbols (1.2 us per bit). y: the 400 kHz WS2811 timing (0.5/2.0 and 1.2/1.3 us)
+            the library used on IDF 4. Switch only if the bench shows wrong colours.
+
+    config HB_BENCH_FAST_NAP
+        bool "Bench: nap after 1 min idle, wake every 1 min"
+        default n
+        help
+            Overrides pwr.idle_nap_min and pwr.nap_wake_min so the bench can see NAP, the timer wake and
+            the button wake in minutes. Never ship with this on.
+
+endmenu

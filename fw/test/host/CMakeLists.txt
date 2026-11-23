@@ -19,7 +19,8 @@ target_include_directories(unity PUBLIC vendor/unity)
 add_library(cjson STATIC vendor/cjson/cJSON.c)
 target_include_directories(cjson PUBLIC vendor/cjson)
 
-add_library(hb_core STATIC "${HB_CORE}/hb_msg.c" "${HB_CORE}/hb_frame.c")
+add_library(hb_core STATIC "${HB_CORE}/hb_msg.c" "${HB_CORE}/hb_frame.c" "${HB_CORE}/hb_button.c"
+            "${HB_CORE}/hb_fx.c" "${HB_CORE}/hb_batt.c" "${HB_CORE}/hb_policy.c" "${HB_CORE}/hb_core.c")
 target_include_directories(hb_core PUBLIC "${HB_CORE}")
 target_link_libraries(hb_core PUBLIC cjson)
 target_compile_options(hb_core PRIVATE -Wall -Wextra -Werror)
@@ -29,3 +30,8 @@ target_link_libraries(test_vectors PRIVATE hb_core unity)
 target_compile_options(test_vectors PRIVATE -Wall -Wextra -Werror)
 target_compile_definitions(test_vectors PRIVATE "HB_VECTORS_PATH=\"${HB_VECTORS}\"")
 add_test(NAME test_vectors COMMAND test_vectors)
+
+add_executable(test_core test_core.c)
+target_link_libraries(test_core PRIVATE hb_core unity)
+target_compile_options(test_core PRIVATE -Wall -Wextra -Werror)
+add_test(NAME test_core COMMAND test_core)

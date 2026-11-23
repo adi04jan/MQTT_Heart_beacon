@@ -7,3 +7,6 @@ android/.kotlin/
 android/build/
 android/core/build/
 android/local.properties
+fw/build/
+fw/sdkconfig
+fw/sdkconfig.old
