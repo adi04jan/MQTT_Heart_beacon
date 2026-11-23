@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Beacons{% endblock %} · Heart Beacon admin</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23a32540' d='M8 14.25 2.2 8.6A3.6 3.6 0 0 1 8 3.9a3.6 3.6 0 0 1 5.8 4.7Z'/%3E%3C/svg%3E">
 <style>
 :root {
   color-scheme: light dark;
@@ -115,6 +116,7 @@ input[type=text], input[type=number], input[type=time], select {
   border: 1px solid var(--line-strong); border-radius: var(--radius);
   transition: border-color 150ms ease-out, box-shadow 150ms ease-out;
 }
+input.mono { font-family: var(--mono); font-size: 0.8125rem; }
 input[type=number] { max-width: 9rem; font-variant-numeric: tabular-nums; }
 input[type=time] { max-width: 9rem; }
 input:hover, select:hover { border-color: var(--muted); }
