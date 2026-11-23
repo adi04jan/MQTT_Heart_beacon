@@ -1,5 +1,7 @@
 """API via TestClient: login, claim rules, settings -> signed config, events, firmware files."""
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -15,15 +17,14 @@ NOW = 1_700_000_000
 
 @pytest.fixture
 def e(tmp_path):
-    pubs, reloads, sleeps = [], [], []
+    pubs, reloads, now = [], [], [NOW]
     ctx = api.Ctx(Db(str(tmp_path / "hb.db")), ec.generate_private_key(ec.SECP256R1()), ["203.0.113.10"],
                   passwd=str(tmp_path / "passwd"), router_hash=auth.mosq_hash("router-pass"),
-                  fw_dir=str(tmp_path), publish=pubs.extend, reload=lambda: reloads.append(1), clock=lambda: NOW,
-                  sleep=sleeps.append)
+                  fw_dir=str(tmp_path), publish=pubs.extend, reload=lambda: reloads.append(1), clock=lambda: now[0])
     pw = {u: api.add_user(ctx, u, u.title()) for u in ("alice", "bob")}
     api.register(ctx, A, assign="alice")
     api.register(ctx, B, assign="bob")
-    return SimpleNamespace(ctx=ctx, c=TestClient(api.create_app(ctx)), pw=pw, pubs=pubs, reloads=reloads, sleeps=sleeps,
+    return SimpleNamespace(ctx=ctx, c=TestClient(api.create_app(ctx)), pw=pw, pubs=pubs, reloads=reloads, now=now,
                            passwd=tmp_path / "passwd")
 
 
@@ -45,6 +46,7 @@ def test_login_returns_mqtt_credentials_in_the_broker_file(e):
     assert e.c.post("/api/v1/login", json={"user": "alice", "pass": "nope"}).status_code == 401
     assert e.c.post("/api/v1/login", json={"user": "zed", "pass": "nope"}).status_code == 401
     e.ctx.db.x("UPDATE user SET disabled = 1 WHERE uid = 'alice'")
+    e.now[0] += 2  # past alice's per-address backoff
     assert e.c.post("/api/v1/login", json={"user": "alice", "pass": e.pw["alice"]}).status_code == 401
 
 
@@ -110,30 +112,79 @@ def test_release_and_reclaim_by_another_user_starts_from_the_seed(e):
     assert e.c.get(f"/api/v1/devices/{A}/settings", headers=bob).json()["name"] == ""
 
 
-def test_bad_logins_from_one_ip_do_not_lock_the_user_out_elsewhere(e):
-    app = e.c.app
-    x, y = TestClient(app, client=("192.0.2.1", 1000)), TestClient(app, client=("192.0.2.2", 1000))
-    for _ in range(api.IP_FAILS):
-        assert x.post("/api/v1/login", json={"user": "alice", "pass": "guess"}).status_code == 401
-    assert e.sleeps == [0.25, 0.5, 1.0, 2.0, 4.0, 4.0, 4.0, 4.0, 4.0]  # backoff for the name, capped
-    assert x.post("/api/v1/login", json={"user": "bob", "pass": e.pw["bob"]}).status_code == 429  # IP X is out
-    assert y.post("/api/v1/login", json={"user": "alice", "pass": e.pw["alice"]}).status_code == 200  # A is not
+def bad(c, user="alice"):
+    return c.post("/api/v1/login", json={"user": user, "pass": "guess-guess-guess"})
 
 
-def test_success_resets_the_users_backoff(e):
-    for _ in range(3):
-        e.c.post("/api/v1/login", json={"user": "alice", "pass": "guess"})
-    login(e, "alice")
-    e.sleeps.clear()
-    login(e, "alice")
-    assert e.sleeps == []
+def test_parallel_bad_logins_from_one_ip_are_capped_before_the_password_check(e, monkeypatch):
+    checks, real = [], auth.check_password
+
+    def slow_check(pw, stored):  # keep attempts in flight together (the test sleeps, not the server)
+        checks.append(1)
+        time.sleep(0.05)
+        return real(pw, stored)
+
+    monkeypatch.setattr(auth, "check_password", slow_check)
+    with ThreadPoolExecutor(50) as pool:
+        codes = list(pool.map(lambda i: bad(e.c, f"u{i}").status_code if i % 2 else bad(e.c).status_code, range(50)))
+    assert len(checks) <= auth.IP_FAILS and codes.count(429) >= 50 - auth.IP_FAILS
+    assert set(codes) <= {401, 429}
+
+
+def test_blocked_ip_does_not_block_the_user_elsewhere_and_says_when(e):
+    x, y = TestClient(e.c.app, client=("192.0.2.1", 1000)), TestClient(e.c.app, client=("192.0.2.2", 1000))
+    for i in range(auth.IP_FAILS):
+        assert bad(x, f"user{i}").status_code == 401
+    blocked = x.post("/api/v1/login", json={"user": "alice", "pass": e.pw["alice"]})
+    assert blocked.status_code == 429 and int(blocked.headers["Retry-After"]) == auth.WINDOW_S
+    assert y.post("/api/v1/login", json={"user": "alice", "pass": e.pw["alice"]}).status_code == 200
+
+
+def test_ip_user_backoff_doubles_and_a_success_resets_it(e):
+    assert bad(e.c).status_code == 401
+    again = bad(e.c)
+    assert again.status_code == 429 and again.headers["Retry-After"] == "1"
+    assert bad(e.c, "bob").status_code == 401  # other names from this address are not held back
+    e.now[0] += 1
+    assert bad(e.c).status_code == 401
+    assert bad(e.c).headers["Retry-After"] == "2"
+    e.now[0] += 2
+    login(e, "alice")  # success: backoff cleared, its reservation released
+    assert bad(e.c).status_code == 401 and bad(e.c).headers["Retry-After"] == "1"
+    assert e.ctx.guard.failed_logins("alice") == 3 and len(e.ctx.guard.times[("ip", "testclient")]) == 4
+
+
+def test_login_never_sleeps(e, monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda s: pytest.fail(f"server slept {s}s"))
+    for i in range(auth.IP_FAILS):
+        bad(e.c, f"user{i}")
+    t = time.perf_counter()
+    assert bad(e.c).status_code == 429
+    assert time.perf_counter() - t < 0.2
 
 
 def test_claim_attempts_are_limited_per_user(e):
     h = login(e, "bob")
-    codes = [e.c.post("/api/v1/devices/claim", json={"did": A}, headers=h).status_code for _ in range(api.CLAIMS + 1)]
-    assert codes == [403] * api.CLAIMS + [429]
+    rs = [e.c.post("/api/v1/devices/claim", json={"did": A}, headers=h) for _ in range(api.CLAIMS + 1)]
+    assert [r.status_code for r in rs] == [403] * api.CLAIMS + [429] and "Retry-After" in rs[-1].headers
     assert e.c.post("/api/v1/devices/claim", json={"did": A}, headers=login(e, "alice")).status_code == 200
+
+
+def test_guard_memory_is_bounded():
+    now = [0.0]
+    g = auth.Guard(lambda: now[0], max_keys=5)
+    for i in range(50):
+        g.login_start(f"10.0.0.{i}", f"u{i}")
+        g.login_failed(f"10.0.0.{i}", f"u{i}")
+        now[0] += 1
+    assert len(g.times) <= 5 and len(g.not_before) <= 5
+    now[0] += auth.WINDOW_S
+    g.take(("claim", "x"), 1)
+    assert list(g.times) == [("claim", "x")] and not g.not_before
+
+
+def test_generated_passwords_are_long(e):
+    assert all(len(pw) >= 16 for pw in e.pw.values())
 
 
 def test_wifi_psks_never_enter_a_signed_config(e):

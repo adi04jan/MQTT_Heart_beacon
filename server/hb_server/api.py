@@ -6,8 +6,8 @@ import hashlib
 import json
 import re
 import secrets
-import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -21,10 +21,7 @@ from .db import Db
 from .router import Pub
 
 SESSION_S = 365 * 24 * 3600
-WINDOW_S = 600
-IP_FAILS = 10  # failed logins per client IP per window, then 429
-CLAIMS = 10  # claim attempts per user per window, then 429
-DELAY_S, DELAY_MAX_S = 0.25, 4.0  # per-username backoff after failed logins: 0.25, 0.5, 1, 2, 4, 4 ... s
+CLAIMS = 10  # claim attempts per user per auth.WINDOW_S, then 429 (login limits live in auth.Guard)
 UID = re.compile(r"[a-z][a-z0-9_]{0,31}")  # never collides with a did (HB-XXXXXX) in the ACL's %u patterns
 DID = re.compile(r"HB-[0-9A-F]{6}")
 FW_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}")
@@ -49,17 +46,21 @@ class Ctx:
     refresh: Callable[[], None] = lambda: None
     reload: Callable[[], None] = lambda: None
     clock: Callable[[], float] = time.time
-    sleep: Callable[[float], None] = time.sleep
     new_id: Callable[[], str] = field(default=lambda: secrets.token_hex(8))
+    guard: auth.Guard | None = None  # shared by API and admin (failed-login counts)
+
+    def __post_init__(self):
+        self.guard = self.guard or auth.Guard(self.clock)
 
 
 # ---- shared operations (API, admin, CLI) ---------------------------------------------------
 
 def add_user(ctx: Ctx, uid: str, name: str, circle: str = "home") -> str:
-    """Create a login; returns its generated password. Phones log in to MQTT as `uid` with `mqtt_pass`."""
+    """Create a login; returns its generated 20-character password (shown once). Phones log in to MQTT as
+    `uid` with `mqtt_pass`. Long random passwords are why failed logins never lock a username."""
     if not UID.fullmatch(uid):
         raise ValueError("uid must match [a-z][a-z0-9_]{0,31}")
-    pw, mqtt_pass = auth.new_secret()[:16], auth.new_secret()
+    pw, mqtt_pass = auth.new_secret()[:20], auth.new_secret()
     ctx.db.x("INSERT INTO user (uid, name, pw, mqtt_pass, mqtt_hash, circle) VALUES (?, ?, ?, ?, ?, ?)",
              (uid, name, auth.hash_password(pw), mqtt_pass, auth.mosq_hash(mqtt_pass), circle))
     sync_broker(ctx)
@@ -137,28 +138,12 @@ def unclaim(ctx: Ctx, did: str, release: bool) -> None:
     ctx.refresh()
 
 
-class Recent:
-    """Timestamps per key inside a sliding window.
-    ponytail: in memory, per process, never pruned; fine for a handful of users."""
-
-    def __init__(self, window: float, clock):
-        self.window, self.clock = window, clock
-        self.hits: dict[tuple, list[float]] = {}
-        self.lock = threading.Lock()
-
-    def count(self, key: tuple) -> int:
-        now = self.clock()
-        with self.lock:
-            self.hits[key] = [t for t in self.hits.get(key, []) if now - t < self.window]
-            return len(self.hits[key])
-
-    def add(self, key: tuple) -> None:
-        with self.lock:
-            self.hits.setdefault(key, []).append(self.clock())
-
-    def reset(self, key: tuple) -> None:
-        with self.lock:
-            self.hits.pop(key, None)
+@contextmanager
+def _limited():
+    try:
+        yield
+    except auth.TooMany as e:
+        raise HTTPException(429, "slow_down", headers={"Retry-After": str(e.retry_after)}) from None
 
 
 def _token_hash(tok: str) -> str:
@@ -179,7 +164,6 @@ class ClaimIn(BaseModel):
 def create_app(ctx: Ctx) -> FastAPI:
     app = FastAPI(title="Heart Beacon", docs_url=None, redoc_url=None, openapi_url=None)
     db = ctx.db
-    recent = Recent(WINDOW_S, ctx.clock)
 
     def me(authorization: str = Header("")):
         tok = authorization.removeprefix("Bearer ").strip()
@@ -196,19 +180,14 @@ def create_app(ctx: Ctx) -> FastAPI:
 
     @app.post("/api/v1/login")
     def login(body: LoginIn, request: Request):
-        # Only failures count. The client IP gets a hard stop; the username only a capped backoff, so spamming
-        # someone's name from one address cannot lock them out of their own phone.
-        ip, who = ("login-ip", request.client.host), ("login-user", body.user)
-        if recent.count(ip) >= IP_FAILS:
-            raise HTTPException(429, "slow_down")
-        if n := recent.count(who):
-            ctx.sleep(min(DELAY_S * 2 ** (n - 1), DELAY_MAX_S))
+        ip = request.client.host
+        with _limited():
+            token = ctx.guard.login_start(ip, body.user)
         row = db.one("SELECT * FROM user WHERE uid = ? AND disabled = 0", (body.user,))
         if row is None or not auth.check_password(body.password, row["pw"]):
-            recent.add(ip)
-            recent.add(who)
+            ctx.guard.login_failed(ip, body.user)
             raise HTTPException(401, "bad_login")
-        recent.reset(who)
+        ctx.guard.login_ok(ip, body.user, token)
         tok = auth.new_secret()
         db.x("INSERT INTO session VALUES (?, ?, ?)", (_token_hash(tok), row["uid"], int(ctx.clock())))
         return {"token": tok, "uid": row["uid"], "name": row["name"],
@@ -223,9 +202,8 @@ def create_app(ctx: Ctx) -> FastAPI:
 
     @app.post("/api/v1/devices/claim")
     def claim(body: ClaimIn, user=Depends(me)):
-        if recent.count(("claim", user["uid"])) >= CLAIMS:  # authenticated, so per user is enough
-            raise HTTPException(429, "slow_down")
-        recent.add(("claim", user["uid"]))
+        with _limited():  # authenticated, so per user is enough
+            ctx.guard.take(("claim", user["uid"]), CLAIMS)
         if not DID.fullmatch(body.did):
             raise HTTPException(422, "bad_did")
         row = db.one("SELECT * FROM device WHERE did = ?", (body.did,))
