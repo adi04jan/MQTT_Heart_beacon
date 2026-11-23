@@ -21,7 +21,10 @@ from .db import Db
 from .router import Pub
 
 SESSION_S = 365 * 24 * 3600
-RATE = (10, 600)  # attempts per key (client IP, user) per window in seconds, for /login and /devices/claim
+WINDOW_S = 600
+IP_FAILS = 10  # failed logins per client IP per window, then 429
+CLAIMS = 10  # claim attempts per user per window, then 429
+DELAY_S, DELAY_MAX_S = 0.25, 4.0  # per-username backoff after failed logins: 0.25, 0.5, 1, 2, 4, 4 ... s
 UID = re.compile(r"[a-z][a-z0-9_]{0,31}")  # never collides with a did (HB-XXXXXX) in the ACL's %u patterns
 DID = re.compile(r"HB-[0-9A-F]{6}")
 FW_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}")
@@ -46,6 +49,7 @@ class Ctx:
     refresh: Callable[[], None] = lambda: None
     reload: Callable[[], None] = lambda: None
     clock: Callable[[], float] = time.time
+    sleep: Callable[[float], None] = time.sleep
     new_id: Callable[[], str] = field(default=lambda: secrets.token_hex(8))
 
 
@@ -133,22 +137,28 @@ def unclaim(ctx: Ctx, did: str, release: bool) -> None:
     ctx.refresh()
 
 
-class RateLimit:
-    """Sliding window per key. ponytail: in memory, per process, never pruned; fine for a handful of users."""
+class Recent:
+    """Timestamps per key inside a sliding window.
+    ponytail: in memory, per process, never pruned; fine for a handful of users."""
 
-    def __init__(self, n: int, window: float, clock):
-        self.n, self.window, self.clock = n, window, clock
+    def __init__(self, window: float, clock):
+        self.window, self.clock = window, clock
         self.hits: dict[tuple, list[float]] = {}
         self.lock = threading.Lock()
 
-    def hit(self, *keys: tuple) -> None:
+    def count(self, key: tuple) -> int:
         now = self.clock()
         with self.lock:
-            recent = {k: [t for t in self.hits.get(k, []) if now - t < self.window] for k in keys}
-            if any(len(v) >= self.n for v in recent.values()):
-                raise HTTPException(429, "slow_down")
-            for k, v in recent.items():
-                self.hits[k] = v + [now]
+            self.hits[key] = [t for t in self.hits.get(key, []) if now - t < self.window]
+            return len(self.hits[key])
+
+    def add(self, key: tuple) -> None:
+        with self.lock:
+            self.hits.setdefault(key, []).append(self.clock())
+
+    def reset(self, key: tuple) -> None:
+        with self.lock:
+            self.hits.pop(key, None)
 
 
 def _token_hash(tok: str) -> str:
@@ -169,7 +179,7 @@ class ClaimIn(BaseModel):
 def create_app(ctx: Ctx) -> FastAPI:
     app = FastAPI(title="Heart Beacon", docs_url=None, redoc_url=None, openapi_url=None)
     db = ctx.db
-    limit = RateLimit(*RATE, ctx.clock)
+    recent = Recent(WINDOW_S, ctx.clock)
 
     def me(authorization: str = Header("")):
         tok = authorization.removeprefix("Bearer ").strip()
@@ -186,10 +196,19 @@ def create_app(ctx: Ctx) -> FastAPI:
 
     @app.post("/api/v1/login")
     def login(body: LoginIn, request: Request):
-        limit.hit(("login", request.client.host), ("login", body.user))
+        # Only failures count. The client IP gets a hard stop; the username only a capped backoff, so spamming
+        # someone's name from one address cannot lock them out of their own phone.
+        ip, who = ("login-ip", request.client.host), ("login-user", body.user)
+        if recent.count(ip) >= IP_FAILS:
+            raise HTTPException(429, "slow_down")
+        if n := recent.count(who):
+            ctx.sleep(min(DELAY_S * 2 ** (n - 1), DELAY_MAX_S))
         row = db.one("SELECT * FROM user WHERE uid = ? AND disabled = 0", (body.user,))
         if row is None or not auth.check_password(body.password, row["pw"]):
+            recent.add(ip)
+            recent.add(who)
             raise HTTPException(401, "bad_login")
+        recent.reset(who)
         tok = auth.new_secret()
         db.x("INSERT INTO session VALUES (?, ?, ?)", (_token_hash(tok), row["uid"], int(ctx.clock())))
         return {"token": tok, "uid": row["uid"], "name": row["name"],
@@ -203,8 +222,10 @@ def create_app(ctx: Ctx) -> FastAPI:
         return {"uid": user["uid"], "name": user["name"], "circle": user["circle"], "devices": devs}
 
     @app.post("/api/v1/devices/claim")
-    def claim(body: ClaimIn, request: Request, user=Depends(me)):
-        limit.hit(("claim", request.client.host), ("claim", user["uid"]))
+    def claim(body: ClaimIn, user=Depends(me)):
+        if recent.count(("claim", user["uid"])) >= CLAIMS:  # authenticated, so per user is enough
+            raise HTTPException(429, "slow_down")
+        recent.add(("claim", user["uid"]))
         if not DID.fullmatch(body.did):
             raise HTTPException(422, "bad_did")
         row = db.one("SELECT * FROM device WHERE did = ?", (body.did,))

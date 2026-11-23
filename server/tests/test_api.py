@@ -15,14 +15,15 @@ NOW = 1_700_000_000
 
 @pytest.fixture
 def e(tmp_path):
-    pubs, reloads = [], []
+    pubs, reloads, sleeps = [], [], []
     ctx = api.Ctx(Db(str(tmp_path / "hb.db")), ec.generate_private_key(ec.SECP256R1()), ["203.0.113.10"],
                   passwd=str(tmp_path / "passwd"), router_hash=auth.mosq_hash("router-pass"),
-                  fw_dir=str(tmp_path), publish=pubs.extend, reload=lambda: reloads.append(1), clock=lambda: NOW)
+                  fw_dir=str(tmp_path), publish=pubs.extend, reload=lambda: reloads.append(1), clock=lambda: NOW,
+                  sleep=sleeps.append)
     pw = {u: api.add_user(ctx, u, u.title()) for u in ("alice", "bob")}
     api.register(ctx, A, assign="alice")
     api.register(ctx, B, assign="bob")
-    return SimpleNamespace(ctx=ctx, c=TestClient(api.create_app(ctx)), pw=pw, pubs=pubs, reloads=reloads,
+    return SimpleNamespace(ctx=ctx, c=TestClient(api.create_app(ctx)), pw=pw, pubs=pubs, reloads=reloads, sleeps=sleeps,
                            passwd=tmp_path / "passwd")
 
 
@@ -109,18 +110,30 @@ def test_release_and_reclaim_by_another_user_starts_from_the_seed(e):
     assert e.c.get(f"/api/v1/devices/{A}/settings", headers=bob).json()["name"] == ""
 
 
-def test_rate_limit_on_login_and_claim(e):
-    for _ in range(api.RATE[0]):
-        assert e.c.post("/api/v1/login", json={"user": "alice", "pass": "guess"}).status_code == 401
-    assert e.c.post("/api/v1/login", json={"user": "alice", "pass": e.pw["alice"]}).status_code == 429
-    assert e.c.post("/api/v1/login", json={"user": "bob", "pass": e.pw["bob"]}).status_code == 429  # same IP
-    fresh = api.create_app(e.ctx)  # new limiter, same DB
-    from fastapi.testclient import TestClient
-    c = TestClient(fresh)
-    tok = c.post("/api/v1/login", json={"user": "bob", "pass": e.pw["bob"]}).json()["token"]
-    h = {"Authorization": "Bearer " + tok}
-    codes = [c.post("/api/v1/devices/claim", json={"did": A}, headers=h).status_code for _ in range(api.RATE[0] + 1)]
-    assert codes == [403] * api.RATE[0] + [429]
+def test_bad_logins_from_one_ip_do_not_lock_the_user_out_elsewhere(e):
+    app = e.c.app
+    x, y = TestClient(app, client=("192.0.2.1", 1000)), TestClient(app, client=("192.0.2.2", 1000))
+    for _ in range(api.IP_FAILS):
+        assert x.post("/api/v1/login", json={"user": "alice", "pass": "guess"}).status_code == 401
+    assert e.sleeps == [0.25, 0.5, 1.0, 2.0, 4.0, 4.0, 4.0, 4.0, 4.0]  # backoff for the name, capped
+    assert x.post("/api/v1/login", json={"user": "bob", "pass": e.pw["bob"]}).status_code == 429  # IP X is out
+    assert y.post("/api/v1/login", json={"user": "alice", "pass": e.pw["alice"]}).status_code == 200  # A is not
+
+
+def test_success_resets_the_users_backoff(e):
+    for _ in range(3):
+        e.c.post("/api/v1/login", json={"user": "alice", "pass": "guess"})
+    login(e, "alice")
+    e.sleeps.clear()
+    login(e, "alice")
+    assert e.sleeps == []
+
+
+def test_claim_attempts_are_limited_per_user(e):
+    h = login(e, "bob")
+    codes = [e.c.post("/api/v1/devices/claim", json={"did": A}, headers=h).status_code for _ in range(api.CLAIMS + 1)]
+    assert codes == [403] * api.CLAIMS + [429]
+    assert e.c.post("/api/v1/devices/claim", json={"did": A}, headers=login(e, "alice")).status_code == 200
 
 
 def test_wifi_psks_never_enter_a_signed_config(e):
