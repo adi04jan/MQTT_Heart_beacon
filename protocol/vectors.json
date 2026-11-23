@@ -1,0 +1,1500 @@
+{
+  "_doc": "Golden vectors for protocol/PROTOCOL.md. Strings are UTF-8; *_hex fields and frames are lowercase hex bytes.",
+  "envelope": {
+    "max_bytes": 1024,
+    "types": [
+      "mood",
+      "show",
+      "shown",
+      "rcpt",
+      "tele",
+      "state",
+      "cfg",
+      "time",
+      "sleep",
+      "get",
+      "resp",
+      "claim",
+      "wifi.scan",
+      "wifi.list",
+      "wifi.set",
+      "wifi.forget",
+      "wifi.use",
+      "link",
+      "relay",
+      "reset"
+    ],
+    "encode": [
+      {
+        "name": "mood_heart",
+        "t": "mood",
+        "id": "0123456789abcdef",
+        "ts": 1795000000,
+        "body": {
+          "k": "heart"
+        },
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":1795000000,\"k\":\"heart\"}"
+      },
+      {
+        "name": "mood_from_router",
+        "t": "mood",
+        "id": "0123456789abcdef",
+        "ts": 1795000000,
+        "body": {
+          "k": "annoy",
+          "from": "user1"
+        },
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":1795000000,\"k\":\"annoy\",\"from\":\"user1\"}"
+      },
+      {
+        "name": "show",
+        "t": "show",
+        "id": "0123456789abcdef",
+        "ts": 1795000000,
+        "body": {
+          "k": "sorry"
+        },
+        "json": "{\"v\":1,\"t\":\"show\",\"id\":\"0123456789abcdef\",\"ts\":1795000000,\"k\":\"sorry\"}"
+      },
+      {
+        "name": "shown",
+        "t": "shown",
+        "id": "0123456789abcdef",
+        "ts": 0,
+        "body": {},
+        "json": "{\"v\":1,\"t\":\"shown\",\"id\":\"0123456789abcdef\",\"ts\":0}"
+      },
+      {
+        "name": "rcpt",
+        "t": "rcpt",
+        "id": "0123456789abcdef",
+        "ts": 1795000000,
+        "body": {
+          "to": "HB-3FA2C1",
+          "st": "queued"
+        },
+        "json": "{\"v\":1,\"t\":\"rcpt\",\"id\":\"0123456789abcdef\",\"ts\":1795000000,\"to\":\"HB-3FA2C1\",\"st\":\"queued\"}"
+      },
+      {
+        "name": "tele_clock_unknown",
+        "t": "tele",
+        "id": "fedcba9876543210",
+        "ts": 0,
+        "body": {
+          "mv": 3912,
+          "pct": 71,
+          "rssi": -63,
+          "fw": "2.0.0",
+          "hw": "A",
+          "cfg": 12,
+          "up_s": 86400,
+          "rst": "deepsleep",
+          "heap": 81234
+        },
+        "json": "{\"v\":1,\"t\":\"tele\",\"id\":\"fedcba9876543210\",\"ts\":0,\"mv\":3912,\"pct\":71,\"rssi\":-63,\"fw\":\"2.0.0\",\"hw\":\"A\",\"cfg\":12,\"up_s\":86400,\"rst\":\"deepsleep\",\"heap\":81234}"
+      },
+      {
+        "name": "state_near",
+        "t": "state",
+        "id": "1111111111111111",
+        "ts": 1795000000,
+        "body": {
+          "st": "near",
+          "path": "ble",
+          "wake": 0
+        },
+        "json": "{\"v\":1,\"t\":\"state\",\"id\":\"1111111111111111\",\"ts\":1795000000,\"st\":\"near\",\"path\":\"ble\",\"wake\":0}"
+      },
+      {
+        "name": "cfg",
+        "t": "cfg",
+        "id": "2222222222222222",
+        "ts": 1795000000,
+        "body": {
+          "n": 12,
+          "b": "eyJjdiI6MX0",
+          "s": "MEUCIQ-_x"
+        },
+        "json": "{\"v\":1,\"t\":\"cfg\",\"id\":\"2222222222222222\",\"ts\":1795000000,\"n\":12,\"b\":\"eyJjdiI6MX0\",\"s\":\"MEUCIQ-_x\"}"
+      },
+      {
+        "name": "time_negative_tz",
+        "t": "time",
+        "id": "3333333333333333",
+        "ts": 1795000000,
+        "body": {
+          "tz": -300
+        },
+        "json": "{\"v\":1,\"t\":\"time\",\"id\":\"3333333333333333\",\"ts\":1795000000,\"tz\":-300}"
+      },
+      {
+        "name": "sleep_until_schedule",
+        "t": "sleep",
+        "id": "4444444444444444",
+        "ts": 1795000000,
+        "body": {
+          "for_s": 0
+        },
+        "json": "{\"v\":1,\"t\":\"sleep\",\"id\":\"4444444444444444\",\"ts\":1795000000,\"for_s\":0}"
+      },
+      {
+        "name": "get_info",
+        "t": "get",
+        "id": "5555555555555555",
+        "ts": 1795000000,
+        "body": {
+          "what": "info"
+        },
+        "json": "{\"v\":1,\"t\":\"get\",\"id\":\"5555555555555555\",\"ts\":1795000000,\"what\":\"info\"}"
+      },
+      {
+        "name": "resp_info",
+        "t": "resp",
+        "id": "6666666666666666",
+        "ts": 1795000000,
+        "body": {
+          "re": "5555555555555555",
+          "ok": true,
+          "d": {
+            "did": "HB-3FA2C1",
+            "fw": "2.0.0",
+            "hw": "A",
+            "pv": 1,
+            "min_pv": 1,
+            "claimed": false
+          }
+        },
+        "json": "{\"v\":1,\"t\":\"resp\",\"id\":\"6666666666666666\",\"ts\":1795000000,\"re\":\"5555555555555555\",\"ok\":true,\"d\":{\"did\":\"HB-3FA2C1\",\"fw\":\"2.0.0\",\"hw\":\"A\",\"pv\":1,\"min_pv\":1,\"claimed\":false}}"
+      },
+      {
+        "name": "wifi_set_utf8",
+        "t": "wifi.set",
+        "id": "7777777777777777",
+        "ts": 0,
+        "body": {
+          "ssid": "Café ♥ 5G",
+          "psk": "päss w0rd!"
+        },
+        "json": "{\"v\":1,\"t\":\"wifi.set\",\"id\":\"7777777777777777\",\"ts\":0,\"ssid\":\"Café ♥ 5G\",\"psk\":\"päss w0rd!\"}"
+      },
+      {
+        "name": "link_up",
+        "t": "link",
+        "id": "8888888888888888",
+        "ts": 1795000000,
+        "body": {
+          "up": true
+        },
+        "json": "{\"v\":1,\"t\":\"link\",\"id\":\"8888888888888888\",\"ts\":1795000000,\"up\":true}"
+      },
+      {
+        "name": "relay_nested",
+        "t": "relay",
+        "id": "9999999999999999",
+        "ts": 1795000000,
+        "body": {
+          "did": "HB-3FA2C1",
+          "m": {
+            "v": 1,
+            "t": "shown",
+            "id": "0123456789abcdef",
+            "ts": 0
+          }
+        },
+        "json": "{\"v\":1,\"t\":\"relay\",\"id\":\"9999999999999999\",\"ts\":1795000000,\"did\":\"HB-3FA2C1\",\"m\":{\"v\":1,\"t\":\"shown\",\"id\":\"0123456789abcdef\",\"ts\":0}}"
+      },
+      {
+        "name": "reset_factory",
+        "t": "reset",
+        "id": "aaaaaaaaaaaaaaaa",
+        "ts": 1795000000,
+        "body": {
+          "what": "factory"
+        },
+        "json": "{\"v\":1,\"t\":\"reset\",\"id\":\"aaaaaaaaaaaaaaaa\",\"ts\":1795000000,\"what\":\"factory\"}"
+      }
+    ],
+    "decode": [
+      {
+        "name": "unknown_keys_ignored",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":5,\"k\":\"heart\",\"zz\":{\"a\":[1,2]},\"future\":\"x\"}",
+        "ok": true,
+        "t": "mood",
+        "id": "0123456789abcdef",
+        "ts": 5,
+        "body": {
+          "k": "heart",
+          "zz": {
+            "a": [
+              1,
+              2
+            ]
+          },
+          "future": "x"
+        }
+      },
+      {
+        "name": "key_order_free",
+        "json": "{\"ts\":5,\"k\":\"heart\",\"id\":\"0123456789abcdef\",\"t\":\"mood\",\"v\":1}",
+        "ok": true,
+        "t": "mood",
+        "id": "0123456789abcdef",
+        "ts": 5,
+        "body": {
+          "k": "heart"
+        }
+      },
+      {
+        "name": "whitespace",
+        "json": " {\n  \"v\" : 1, \"t\" : \"link\", \"id\" : \"0123456789abcdef\", \"ts\" : 0, \"up\" : false\r\n}\t\n",
+        "ok": true,
+        "t": "link",
+        "id": "0123456789abcdef",
+        "ts": 0,
+        "body": {
+          "up": false
+        }
+      },
+      {
+        "name": "unknown_t_still_decodes",
+        "json": "{\"v\":1,\"t\":\"dance\",\"id\":\"00112233445566aa\",\"ts\":5}",
+        "ok": true,
+        "t": "dance",
+        "id": "00112233445566aa",
+        "ts": 5,
+        "body": {}
+      },
+      {
+        "name": "ts_max_u32",
+        "json": "{\"v\":1,\"t\":\"get\",\"id\":\"0123456789abcdef\",\"ts\":4294967295,\"what\":\"info\"}",
+        "ok": true,
+        "t": "get",
+        "id": "0123456789abcdef",
+        "ts": 4294967295,
+        "body": {
+          "what": "info"
+        }
+      },
+      {
+        "name": "exactly_1024_bytes",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":5,\"pad\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+        "ok": true,
+        "t": "mood",
+        "id": "0123456789abcdef",
+        "ts": 5,
+        "body": {
+          "pad": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      },
+      {
+        "name": "too_big_1025_bytes",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":5,\"pad\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+        "err": "too_big"
+      },
+      {
+        "name": "empty",
+        "json": "",
+        "err": "bad_json"
+      },
+      {
+        "name": "not_json",
+        "json": "heart",
+        "err": "bad_json"
+      },
+      {
+        "name": "truncated",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":5",
+        "err": "bad_json"
+      },
+      {
+        "name": "trailing_garbage",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":5} x",
+        "err": "bad_json"
+      },
+      {
+        "name": "two_objects",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":5}{}",
+        "err": "bad_json"
+      },
+      {
+        "name": "top_level_array",
+        "json": "[1]",
+        "err": "bad_json"
+      },
+      {
+        "name": "nan_literal",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":5,\"x\":NaN}",
+        "err": "bad_json"
+      },
+      {
+        "name": "v_missing",
+        "json": "{\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":5}",
+        "err": "bad_v"
+      },
+      {
+        "name": "v_2",
+        "json": "{\"v\":2,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":5}",
+        "err": "bad_v"
+      },
+      {
+        "name": "v_string",
+        "json": "{\"v\":\"1\",\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":5}",
+        "err": "bad_v"
+      },
+      {
+        "name": "v_true",
+        "json": "{\"v\":true,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":5}",
+        "err": "bad_v"
+      },
+      {
+        "name": "t_missing",
+        "json": "{\"v\":1,\"id\":\"0123456789abcdef\",\"ts\":5}",
+        "err": "bad_t"
+      },
+      {
+        "name": "t_empty",
+        "json": "{\"v\":1,\"t\":\"\",\"id\":\"0123456789abcdef\",\"ts\":5}",
+        "err": "bad_t"
+      },
+      {
+        "name": "t_number",
+        "json": "{\"v\":1,\"t\":7,\"id\":\"0123456789abcdef\",\"ts\":5}",
+        "err": "bad_t"
+      },
+      {
+        "name": "id_missing",
+        "json": "{\"v\":1,\"t\":\"mood\",\"ts\":5}",
+        "err": "bad_id"
+      },
+      {
+        "name": "id_15_chars",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcde\",\"ts\":5}",
+        "err": "bad_id"
+      },
+      {
+        "name": "id_17_chars",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef0\",\"ts\":5}",
+        "err": "bad_id"
+      },
+      {
+        "name": "id_uppercase",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789ABCDEF\",\"ts\":5}",
+        "err": "bad_id"
+      },
+      {
+        "name": "id_not_hex",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdeg\",\"ts\":5}",
+        "err": "bad_id"
+      },
+      {
+        "name": "id_number",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":1234567890123456,\"ts\":5}",
+        "err": "bad_id"
+      },
+      {
+        "name": "ts_missing",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\"}",
+        "err": "bad_ts"
+      },
+      {
+        "name": "ts_negative",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":-1}",
+        "err": "bad_ts"
+      },
+      {
+        "name": "ts_fraction",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":1.5}",
+        "err": "bad_ts"
+      },
+      {
+        "name": "ts_string",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":\"5\"}",
+        "err": "bad_ts"
+      },
+      {
+        "name": "ts_over_u32",
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":4294967296}",
+        "err": "bad_ts"
+      }
+    ],
+    "unknown_t": [
+      {
+        "name": "unknown_type",
+        "json": "{\"v\":1,\"t\":\"dance\",\"id\":\"00112233445566aa\",\"ts\":5,\"k\":\"heart\"}",
+        "resp_id": "a1b2c3d4e5f60718",
+        "resp_ts": 1795000001,
+        "resp_json": "{\"v\":1,\"t\":\"resp\",\"id\":\"a1b2c3d4e5f60718\",\"ts\":1795000001,\"re\":\"00112233445566aa\",\"ok\":false,\"err\":\"unknown_t\"}"
+      },
+      {
+        "name": "future_wifi_type",
+        "json": "{\"v\":1,\"t\":\"wifi.scan2\",\"id\":\"0123456789abcdef\",\"ts\":0}",
+        "resp_id": "0000000000000001",
+        "resp_ts": 0,
+        "resp_json": "{\"v\":1,\"t\":\"resp\",\"id\":\"0000000000000001\",\"ts\":0,\"re\":\"0123456789abcdef\",\"ok\":false,\"err\":\"unknown_t\"}"
+      },
+      {
+        "name": "known_type_no_resp",
+        "json": "{\"v\":1,\"t\":\"get\",\"id\":\"0123456789abcdef\",\"ts\":0,\"what\":\"info\"}",
+        "resp_id": "0000000000000002",
+        "resp_ts": 0,
+        "resp_json": null
+      }
+    ],
+    "did": [
+      {
+        "mac": "a0764e3fa2c1",
+        "did": "HB-3FA2C1"
+      },
+      {
+        "mac": "000000000001",
+        "did": "HB-000001"
+      },
+      {
+        "mac": "ffffffffffff",
+        "did": "HB-FFFFFF"
+      }
+    ]
+  },
+  "frame": {
+    "max_msg": 1024,
+    "min_mtu": 23,
+    "timeout_ms": 2000,
+    "split": [
+      {
+        "name": "mtu23_exactly_one_frame",
+        "mtu": 23,
+        "seq": 0,
+        "msg": "{\"p\":\"aaaaaaaaaaa\"}",
+        "frames": [
+          "007b2270223a226161616161616161616161227d"
+        ]
+      },
+      {
+        "name": "mtu23_one_byte_over",
+        "mtu": 23,
+        "seq": 1,
+        "msg": "{\"p\":\"aaaaaaaaaaaa\"}",
+        "frames": [
+          "817b2270223a2261616161616161616161616122",
+          "017d"
+        ]
+      },
+      {
+        "name": "mtu23_mood",
+        "mtu": 23,
+        "seq": 5,
+        "msg": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":1795000000,\"k\":\"heart\"}",
+        "frames": [
+          "857b2276223a312c2274223a226d6f6f64222c22",
+          "856964223a223031323334353637383961626364",
+          "856566222c227473223a31373935303030303030",
+          "052c226b223a226865617274227d"
+        ]
+      },
+      {
+        "name": "mtu23_utf8_char_split",
+        "mtu": 23,
+        "seq": 6,
+        "msg": "{\"v\":1,\"t\":\"wifi.set\",\"id\":\"7777777777777777\",\"ts\":0,\"ssid\":\"x♥♥♥♥♥♥♥♥\",\"psk\":\"x\"}",
+        "frames": [
+          "867b2276223a312c2274223a22776966692e7365",
+          "8674222c226964223a2237373737373737373737",
+          "86373737373737222c227473223a302c22737369",
+          "8664223a2278e299a5e299a5e299a5e299a5e299",
+          "86a5e299a5e299a5e299a5222c2270736b223a22",
+          "0678227d"
+        ]
+      },
+      {
+        "name": "mtu185_two_frames",
+        "mtu": 185,
+        "seq": 42,
+        "msg": "{\"p\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+        "frames": [
+          "aa7b2270223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+          "2a6161616161616161616161616161616161227d"
+        ]
+      },
+      {
+        "name": "mtu247_exactly_one_frame",
+        "mtu": 247,
+        "seq": 7,
+        "msg": "{\"p\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+        "frames": [
+          "077b2270223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161227d"
+        ]
+      },
+      {
+        "name": "mtu247_one_byte_over",
+        "mtu": 247,
+        "seq": 8,
+        "msg": "{\"p\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+        "frames": [
+          "887b2270223a22616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616122",
+          "087d"
+        ]
+      },
+      {
+        "name": "mtu247_max_1024",
+        "mtu": 247,
+        "seq": 9,
+        "msg": "{\"p\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+        "frames": [
+          "897b2270223a22616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+          "89616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+          "89616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+          "89616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+          "096161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161227d"
+        ]
+      },
+      {
+        "name": "seq_127",
+        "mtu": 23,
+        "seq": 127,
+        "msg": "{\"p\":\"aaaaaaaaaaaa\"}",
+        "frames": [
+          "ff7b2270223a2261616161616161616161616122",
+          "7f7d"
+        ]
+      },
+      {
+        "name": "seq_0_after_wrap",
+        "mtu": 23,
+        "seq": 0,
+        "msg": "{\"p\":\"aaaaaaaaaaaa\"}",
+        "frames": [
+          "807b2270223a2261616161616161616161616122",
+          "007d"
+        ]
+      }
+    ],
+    "split_reject": [
+      {
+        "name": "mtu_22",
+        "mtu": 22,
+        "seq": 0,
+        "msg": "{}"
+      },
+      {
+        "name": "empty_msg",
+        "mtu": 23,
+        "seq": 0,
+        "msg": ""
+      },
+      {
+        "name": "msg_1025",
+        "mtu": 247,
+        "seq": 0,
+        "msg": "{\"p\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"} "
+      },
+      {
+        "name": "seq_128",
+        "mtu": 23,
+        "seq": 128,
+        "msg": "{}"
+      },
+      {
+        "name": "seq_negative",
+        "mtu": 23,
+        "seq": -1,
+        "msg": "{}"
+      }
+    ],
+    "reassemble": [
+      {
+        "name": "in_order",
+        "steps": [
+          {
+            "at": 0,
+            "frame": "817b2276223a312c2274223a226c696e6b222c22",
+            "out": "partial"
+          },
+          {
+            "at": 30,
+            "frame": "816964223a223131313131313131313131313131",
+            "out": "partial"
+          },
+          {
+            "at": 60,
+            "frame": "813131222c227473223a302c227570223a747275",
+            "out": "partial"
+          },
+          {
+            "at": 90,
+            "frame": "01657d",
+            "out": "complete",
+            "msg": "{\"v\":1,\"t\":\"link\",\"id\":\"1111111111111111\",\"ts\":0,\"up\":true}"
+          }
+        ]
+      },
+      {
+        "name": "single_frame",
+        "steps": [
+          {
+            "at": 0,
+            "frame": "027b2270223a2263227d",
+            "out": "complete",
+            "msg": "{\"p\":\"c\"}"
+          }
+        ]
+      },
+      {
+        "name": "gap_2000_accepted",
+        "steps": [
+          {
+            "at": 0,
+            "frame": "827b2276223a312c2274223a226c696e6b222c22",
+            "out": "partial"
+          },
+          {
+            "at": 2000,
+            "frame": "826964223a223131313131313131313131313131",
+            "out": "partial"
+          },
+          {
+            "at": 4000,
+            "frame": "823131222c227473223a302c227570223a747275",
+            "out": "partial"
+          },
+          {
+            "at": 6000,
+            "frame": "02657d",
+            "out": "complete",
+            "msg": "{\"v\":1,\"t\":\"link\",\"id\":\"1111111111111111\",\"ts\":0,\"up\":true}"
+          }
+        ]
+      },
+      {
+        "name": "gap_2001_skips_tail",
+        "steps": [
+          {
+            "at": 0,
+            "frame": "837b2276223a312c2274223a226c696e6b222c22",
+            "out": "partial"
+          },
+          {
+            "at": 2001,
+            "frame": "836964223a223131313131313131313131313131",
+            "out": "skip"
+          },
+          {
+            "at": 2010,
+            "frame": "833131222c227473223a302c227570223a747275",
+            "out": "skip"
+          },
+          {
+            "at": 2020,
+            "frame": "03657d",
+            "out": "skip"
+          },
+          {
+            "at": 2030,
+            "frame": "047b2270223a2263227d",
+            "out": "complete",
+            "msg": "{\"p\":\"c\"}"
+          }
+        ]
+      },
+      {
+        "name": "new_seq_aborts_partial",
+        "steps": [
+          {
+            "at": 0,
+            "frame": "857b2276223a312c2274223a226c696e6b222c22",
+            "out": "partial"
+          },
+          {
+            "at": 10,
+            "frame": "856964223a223131313131313131313131313131",
+            "out": "partial"
+          },
+          {
+            "at": 20,
+            "frame": "067b2270223a2263227d",
+            "out": "complete",
+            "msg": "{\"p\":\"c\"}"
+          }
+        ]
+      },
+      {
+        "name": "long_gap_then_new_seq",
+        "steps": [
+          {
+            "at": 0,
+            "frame": "877b2276223a312c2274223a226c696e6b222c22",
+            "out": "partial"
+          },
+          {
+            "at": 9000,
+            "frame": "087b2270223a2263227d",
+            "out": "complete",
+            "msg": "{\"p\":\"c\"}"
+          }
+        ]
+      },
+      {
+        "name": "seq_wrap_127_to_0",
+        "steps": [
+          {
+            "at": 0,
+            "frame": "ff7b2270223a2261616161616161616161616122",
+            "out": "partial"
+          },
+          {
+            "at": 10,
+            "frame": "7f7d",
+            "out": "complete",
+            "msg": "{\"p\":\"aaaaaaaaaaaa\"}"
+          },
+          {
+            "at": 20,
+            "frame": "807b2270223a2261616161616161616161616122",
+            "out": "partial"
+          },
+          {
+            "at": 30,
+            "frame": "007d",
+            "out": "complete",
+            "msg": "{\"p\":\"aaaaaaaaaaaa\"}"
+          }
+        ]
+      },
+      {
+        "name": "same_seq_after_complete_is_new_message",
+        "steps": [
+          {
+            "at": 0,
+            "frame": "097b2270223a2263227d",
+            "out": "complete",
+            "msg": "{\"p\":\"c\"}"
+          },
+          {
+            "at": 10,
+            "frame": "097b2270223a2263227d",
+            "out": "complete",
+            "msg": "{\"p\":\"c\"}"
+          }
+        ]
+      },
+      {
+        "name": "empty_frame_ignored",
+        "steps": [
+          {
+            "at": 0,
+            "frame": "8a7b2276223a312c2274223a226c696e6b222c22",
+            "out": "partial"
+          },
+          {
+            "at": 5,
+            "frame": "",
+            "out": "empty"
+          },
+          {
+            "at": 10,
+            "frame": "8a6964223a223131313131313131313131313131",
+            "out": "partial"
+          },
+          {
+            "at": 20,
+            "frame": "8a3131222c227473223a302c227570223a747275",
+            "out": "partial"
+          },
+          {
+            "at": 30,
+            "frame": "0a657d",
+            "out": "complete",
+            "msg": "{\"v\":1,\"t\":\"link\",\"id\":\"1111111111111111\",\"ts\":0,\"up\":true}"
+          }
+        ]
+      },
+      {
+        "name": "header_only_last_frame",
+        "steps": [
+          {
+            "at": 0,
+            "frame": "8c7b2270223a2263227d",
+            "out": "partial"
+          },
+          {
+            "at": 10,
+            "frame": "0c",
+            "out": "complete",
+            "msg": "{\"p\":\"c\"}"
+          }
+        ]
+      },
+      {
+        "name": "oversize_then_skip_then_recover",
+        "steps": [
+          {
+            "at": 0,
+            "frame": "8b7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+            "out": "partial"
+          },
+          {
+            "at": 10,
+            "frame": "8b7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+            "out": "partial"
+          },
+          {
+            "at": 20,
+            "frame": "8b7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+            "out": "partial"
+          },
+          {
+            "at": 30,
+            "frame": "8b7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+            "out": "partial"
+          },
+          {
+            "at": 40,
+            "frame": "8b7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+            "out": "oversize"
+          },
+          {
+            "at": 50,
+            "frame": "0b7a7a",
+            "out": "skip"
+          },
+          {
+            "at": 60,
+            "frame": "0d7b2270223a2263227d",
+            "out": "complete",
+            "msg": "{\"p\":\"c\"}"
+          }
+        ]
+      },
+      {
+        "name": "oversize_on_last_frame_returns_to_idle",
+        "steps": [
+          {
+            "at": 0,
+            "frame": "8b7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+            "out": "partial"
+          },
+          {
+            "at": 10,
+            "frame": "8b7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+            "out": "partial"
+          },
+          {
+            "at": 20,
+            "frame": "8b7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+            "out": "partial"
+          },
+          {
+            "at": 30,
+            "frame": "8b7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+            "out": "partial"
+          },
+          {
+            "at": 40,
+            "frame": "0b7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+            "out": "oversize"
+          },
+          {
+            "at": 50,
+            "frame": "0b7b2270223a2263227d",
+            "out": "complete",
+            "msg": "{\"p\":\"c\"}"
+          }
+        ]
+      },
+      {
+        "name": "time_wraps_u32",
+        "steps": [
+          {
+            "at": 4294967000,
+            "frame": "8e7b2276223a312c2274223a226c696e6b222c22",
+            "out": "partial"
+          },
+          {
+            "at": 4294967295,
+            "frame": "8e6964223a223131313131313131313131313131",
+            "out": "partial"
+          },
+          {
+            "at": 704,
+            "frame": "8e3131222c227473223a302c227570223a747275",
+            "out": "partial"
+          },
+          {
+            "at": 1000,
+            "frame": "0e657d",
+            "out": "complete",
+            "msg": "{\"v\":1,\"t\":\"link\",\"id\":\"1111111111111111\",\"ts\":0,\"up\":true}"
+          }
+        ]
+      },
+      {
+        "name": "time_wraps_u32_gap_too_long",
+        "steps": [
+          {
+            "at": 4294966000,
+            "frame": "8f7b2276223a312c2274223a226c696e6b222c22",
+            "out": "partial"
+          },
+          {
+            "at": 1000,
+            "frame": "8f6964223a223131313131313131313131313131",
+            "out": "skip"
+          }
+        ]
+      }
+    ]
+  },
+  "config": {
+    "max_bytes": 1024,
+    "defaults": {
+      "srv": {
+        "hosts": [],
+        "mqtt": [
+          8883
+        ],
+        "api": 8443
+      },
+      "name": "",
+      "led": {
+        "bright": 60
+      },
+      "sched": {
+        "on": false,
+        "tz": 0,
+        "days": "1111100",
+        "start": "09:00",
+        "stop": "19:00"
+      },
+      "pwr": {
+        "idle_nap_min": 90,
+        "nap_wake_min": 15,
+        "batt_low_mv": 3450,
+        "batt_off_mv": 3300,
+        "batt_cal_ppm": 0
+      },
+      "ble": {
+        "adv_fast_ms": 100,
+        "adv_fast_s": 30,
+        "adv_slow_ms": 500,
+        "conn_ms": 500,
+        "latency": 3,
+        "sup_ms": 6000
+      },
+      "net": {
+        "use_wifi": true,
+        "near_hold_s": 30,
+        "away_grace_s": 60,
+        "tele_min": 30,
+        "wifi": []
+      },
+      "fw": {
+        "ver": "",
+        "path": "",
+        "sha256": "",
+        "min_mv": 3700
+      }
+    },
+    "parse": [
+      {
+        "name": "minimal_takes_defaults",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\"}",
+        "cfg": {
+          "cv": 1,
+          "n": 1,
+          "did": "HB-3FA2C1",
+          "srv": {
+            "hosts": [],
+            "mqtt": [
+              8883
+            ],
+            "api": 8443
+          },
+          "name": "",
+          "led": {
+            "bright": 60
+          },
+          "sched": {
+            "on": false,
+            "tz": 0,
+            "days": "1111100",
+            "start": "09:00",
+            "stop": "19:00"
+          },
+          "pwr": {
+            "idle_nap_min": 90,
+            "nap_wake_min": 15,
+            "batt_low_mv": 3450,
+            "batt_off_mv": 3300,
+            "batt_cal_ppm": 0
+          },
+          "ble": {
+            "adv_fast_ms": 100,
+            "adv_fast_s": 30,
+            "adv_slow_ms": 500,
+            "conn_ms": 500,
+            "latency": 3,
+            "sup_ms": 6000
+          },
+          "net": {
+            "use_wifi": true,
+            "near_hold_s": 30,
+            "away_grace_s": 60,
+            "tele_min": 30,
+            "wifi": []
+          },
+          "fw": {
+            "ver": "",
+            "path": "",
+            "sha256": "",
+            "min_mv": 3700
+          }
+        }
+      },
+      {
+        "name": "plan_example",
+        "json": "{\"cv\":1,\"n\":12,\"did\":\"HB-3FA2C1\",\"srv\":{\"hosts\":[\"203.0.113.10\"],\"mqtt\":[8883],\"api\":8443},\"name\":\"Desk\",\"led\":{\"bright\":60},\"sched\":{\"on\":true,\"tz\":330,\"days\":\"1111100\",\"start\":\"09:00\",\"stop\":\"19:00\"},\"pwr\":{\"idle_nap_min\":90,\"nap_wake_min\":15,\"batt_low_mv\":3450,\"batt_off_mv\":3300,\"batt_cal_ppm\":0},\"ble\":{\"adv_fast_ms\":100,\"adv_fast_s\":30,\"adv_slow_ms\":500,\"conn_ms\":500,\"latency\":3,\"sup_ms\":6000},\"net\":{\"use_wifi\":true,\"near_hold_s\":30,\"away_grace_s\":60,\"tele_min\":30,\"wifi\":[]},\"fw\":{\"ver\":\"2.0.0\",\"path\":\"/fw/hb-2.0.0.bin\",\"sha256\":\"\",\"min_mv\":3700}}",
+        "cfg": {
+          "cv": 1,
+          "n": 12,
+          "did": "HB-3FA2C1",
+          "srv": {
+            "hosts": [
+              "203.0.113.10"
+            ],
+            "mqtt": [
+              8883
+            ],
+            "api": 8443
+          },
+          "name": "Desk",
+          "led": {
+            "bright": 60
+          },
+          "sched": {
+            "on": true,
+            "tz": 330,
+            "days": "1111100",
+            "start": "09:00",
+            "stop": "19:00"
+          },
+          "pwr": {
+            "idle_nap_min": 90,
+            "nap_wake_min": 15,
+            "batt_low_mv": 3450,
+            "batt_off_mv": 3300,
+            "batt_cal_ppm": 0
+          },
+          "ble": {
+            "adv_fast_ms": 100,
+            "adv_fast_s": 30,
+            "adv_slow_ms": 500,
+            "conn_ms": 500,
+            "latency": 3,
+            "sup_ms": 6000
+          },
+          "net": {
+            "use_wifi": true,
+            "near_hold_s": 30,
+            "away_grace_s": 60,
+            "tele_min": 30,
+            "wifi": []
+          },
+          "fw": {
+            "ver": "2.0.0",
+            "path": "/fw/hb-2.0.0.bin",
+            "sha256": "",
+            "min_mv": 3700
+          }
+        }
+      },
+      {
+        "name": "partial_blocks_merge_defaults",
+        "json": "{\"cv\":1,\"n\":2,\"did\":\"HB-000001\",\"led\":{},\"sched\":{\"on\":true,\"tz\":330},\"net\":{\"wifi\":[{\"ssid\":\"Office\",\"psk\":\"longenough\"},{\"ssid\":\"Open\"}]}}",
+        "cfg": {
+          "cv": 1,
+          "n": 2,
+          "did": "HB-000001",
+          "srv": {
+            "hosts": [],
+            "mqtt": [
+              8883
+            ],
+            "api": 8443
+          },
+          "name": "",
+          "led": {
+            "bright": 60
+          },
+          "sched": {
+            "on": true,
+            "tz": 330,
+            "days": "1111100",
+            "start": "09:00",
+            "stop": "19:00"
+          },
+          "pwr": {
+            "idle_nap_min": 90,
+            "nap_wake_min": 15,
+            "batt_low_mv": 3450,
+            "batt_off_mv": 3300,
+            "batt_cal_ppm": 0
+          },
+          "ble": {
+            "adv_fast_ms": 100,
+            "adv_fast_s": 30,
+            "adv_slow_ms": 500,
+            "conn_ms": 500,
+            "latency": 3,
+            "sup_ms": 6000
+          },
+          "net": {
+            "use_wifi": true,
+            "near_hold_s": 30,
+            "away_grace_s": 60,
+            "tele_min": 30,
+            "wifi": [
+              {
+                "ssid": "Office",
+                "psk": "longenough"
+              },
+              {
+                "ssid": "Open",
+                "psk": ""
+              }
+            ]
+          },
+          "fw": {
+            "ver": "",
+            "path": "",
+            "sha256": "",
+            "min_mv": 3700
+          }
+        }
+      },
+      {
+        "name": "unknown_keys_ignored",
+        "json": "{\"cv\":1,\"n\":3,\"did\":\"HB-3FA2C1\",\"future\":{\"x\":1},\"led\":{\"bright\":10,\"hue\":5},\"net\":{\"wifi\":[{\"ssid\":\"A\",\"psk\":\"\",\"prio\":1}]}}",
+        "cfg": {
+          "cv": 1,
+          "n": 3,
+          "did": "HB-3FA2C1",
+          "srv": {
+            "hosts": [],
+            "mqtt": [
+              8883
+            ],
+            "api": 8443
+          },
+          "name": "",
+          "led": {
+            "bright": 10
+          },
+          "sched": {
+            "on": false,
+            "tz": 0,
+            "days": "1111100",
+            "start": "09:00",
+            "stop": "19:00"
+          },
+          "pwr": {
+            "idle_nap_min": 90,
+            "nap_wake_min": 15,
+            "batt_low_mv": 3450,
+            "batt_off_mv": 3300,
+            "batt_cal_ppm": 0
+          },
+          "ble": {
+            "adv_fast_ms": 100,
+            "adv_fast_s": 30,
+            "adv_slow_ms": 500,
+            "conn_ms": 500,
+            "latency": 3,
+            "sup_ms": 6000
+          },
+          "net": {
+            "use_wifi": true,
+            "near_hold_s": 30,
+            "away_grace_s": 60,
+            "tele_min": 30,
+            "wifi": [
+              {
+                "ssid": "A",
+                "psk": ""
+              }
+            ]
+          },
+          "fw": {
+            "ver": "",
+            "path": "",
+            "sha256": "",
+            "min_mv": 3700
+          }
+        }
+      },
+      {
+        "name": "utf8_name_32_bytes",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"name\":\"♥♥♥♥♥♥♥♥♥♥ab\"}",
+        "cfg": {
+          "cv": 1,
+          "n": 1,
+          "did": "HB-3FA2C1",
+          "srv": {
+            "hosts": [],
+            "mqtt": [
+              8883
+            ],
+            "api": 8443
+          },
+          "name": "♥♥♥♥♥♥♥♥♥♥ab",
+          "led": {
+            "bright": 60
+          },
+          "sched": {
+            "on": false,
+            "tz": 0,
+            "days": "1111100",
+            "start": "09:00",
+            "stop": "19:00"
+          },
+          "pwr": {
+            "idle_nap_min": 90,
+            "nap_wake_min": 15,
+            "batt_low_mv": 3450,
+            "batt_off_mv": 3300,
+            "batt_cal_ppm": 0
+          },
+          "ble": {
+            "adv_fast_ms": 100,
+            "adv_fast_s": 30,
+            "adv_slow_ms": 500,
+            "conn_ms": 500,
+            "latency": 3,
+            "sup_ms": 6000
+          },
+          "net": {
+            "use_wifi": true,
+            "near_hold_s": 30,
+            "away_grace_s": 60,
+            "tele_min": 30,
+            "wifi": []
+          },
+          "fw": {
+            "ver": "",
+            "path": "",
+            "sha256": "",
+            "min_mv": 3700
+          }
+        }
+      },
+      {
+        "name": "exactly_1024_bytes",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"pad\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+        "cfg": {
+          "cv": 1,
+          "n": 1,
+          "did": "HB-3FA2C1",
+          "srv": {
+            "hosts": [],
+            "mqtt": [
+              8883
+            ],
+            "api": 8443
+          },
+          "name": "",
+          "led": {
+            "bright": 60
+          },
+          "sched": {
+            "on": false,
+            "tz": 0,
+            "days": "1111100",
+            "start": "09:00",
+            "stop": "19:00"
+          },
+          "pwr": {
+            "idle_nap_min": 90,
+            "nap_wake_min": 15,
+            "batt_low_mv": 3450,
+            "batt_off_mv": 3300,
+            "batt_cal_ppm": 0
+          },
+          "ble": {
+            "adv_fast_ms": 100,
+            "adv_fast_s": 30,
+            "adv_slow_ms": 500,
+            "conn_ms": 500,
+            "latency": 3,
+            "sup_ms": 6000
+          },
+          "net": {
+            "use_wifi": true,
+            "near_hold_s": 30,
+            "away_grace_s": 60,
+            "tele_min": 30,
+            "wifi": []
+          },
+          "fw": {
+            "ver": "",
+            "path": "",
+            "sha256": "",
+            "min_mv": 3700
+          }
+        }
+      },
+      {
+        "name": "too_big_1025_bytes",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"pad\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+        "err": "size"
+      },
+      {
+        "name": "not_json",
+        "json": "{cv:1}",
+        "err": "json"
+      },
+      {
+        "name": "not_object",
+        "json": "[1]",
+        "err": "json"
+      },
+      {
+        "name": "cv_missing",
+        "json": "{\"n\":1,\"did\":\"HB-3FA2C1\"}",
+        "err": "cv"
+      },
+      {
+        "name": "cv_2",
+        "json": "{\"cv\":2,\"n\":1,\"did\":\"HB-3FA2C1\"}",
+        "err": "cv"
+      },
+      {
+        "name": "n_missing",
+        "json": "{\"cv\":1,\"did\":\"HB-3FA2C1\"}",
+        "err": "n"
+      },
+      {
+        "name": "n_zero",
+        "json": "{\"cv\":1,\"n\":0,\"did\":\"HB-3FA2C1\"}",
+        "err": "n"
+      },
+      {
+        "name": "did_lowercase",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3fa2c1\"}",
+        "err": "did"
+      },
+      {
+        "name": "did_short",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C\"}",
+        "err": "did"
+      },
+      {
+        "name": "srv_hosts_empty_string",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"srv\":{\"hosts\":[\"\"]}}",
+        "err": "srv.hosts"
+      },
+      {
+        "name": "srv_port_zero",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"srv\":{\"mqtt\":[0]}}",
+        "err": "srv.mqtt"
+      },
+      {
+        "name": "name_33_bytes",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"name\":\"♥♥♥♥♥♥♥♥♥♥♥\"}",
+        "err": "name"
+      },
+      {
+        "name": "led_not_object",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"led\":60}",
+        "err": "led"
+      },
+      {
+        "name": "bright_101",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"led\":{\"bright\":101}}",
+        "err": "led.bright"
+      },
+      {
+        "name": "bright_string",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"led\":{\"bright\":\"60\"}}",
+        "err": "led.bright"
+      },
+      {
+        "name": "bright_bool",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"led\":{\"bright\":true}}",
+        "err": "led.bright"
+      },
+      {
+        "name": "sched_on_int",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"sched\":{\"on\":1}}",
+        "err": "sched.on"
+      },
+      {
+        "name": "tz_out_of_range",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"sched\":{\"tz\":841}}",
+        "err": "sched.tz"
+      },
+      {
+        "name": "days_6_chars",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"sched\":{\"days\":\"111110\"}}",
+        "err": "sched.days"
+      },
+      {
+        "name": "days_bad_char",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"sched\":{\"days\":\"11111x0\"}}",
+        "err": "sched.days"
+      },
+      {
+        "name": "start_24h",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"sched\":{\"start\":\"24:00\"}}",
+        "err": "sched.start"
+      },
+      {
+        "name": "stop_no_colon",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"sched\":{\"stop\":\"1900\"}}",
+        "err": "sched.stop"
+      },
+      {
+        "name": "batt_off_not_below_low",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"pwr\":{\"batt_low_mv\":3300,\"batt_off_mv\":3300}}",
+        "err": "pwr.batt_off_mv"
+      },
+      {
+        "name": "nap_wake_zero",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"pwr\":{\"nap_wake_min\":0}}",
+        "err": "pwr.nap_wake_min"
+      },
+      {
+        "name": "adv_slow_too_fast",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"ble\":{\"adv_slow_ms\":19}}",
+        "err": "ble.adv_slow_ms"
+      },
+      {
+        "name": "sup_timeout_too_short",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"ble\":{\"conn_ms\":1000,\"latency\":3,\"sup_ms\":8000}}",
+        "err": "ble.sup_ms"
+      },
+      {
+        "name": "wifi_5_networks",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"net\":{\"wifi\":[{\"ssid\":\"n0\"},{\"ssid\":\"n1\"},{\"ssid\":\"n2\"},{\"ssid\":\"n3\"},{\"ssid\":\"n4\"}]}}",
+        "err": "net.wifi"
+      },
+      {
+        "name": "wifi_psk_7_chars",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"net\":{\"wifi\":[{\"ssid\":\"a\",\"psk\":\"1234567\"}]}}",
+        "err": "net.wifi"
+      },
+      {
+        "name": "wifi_ssid_missing",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"net\":{\"wifi\":[{\"psk\":\"12345678\"}]}}",
+        "err": "net.wifi"
+      },
+      {
+        "name": "tele_min_zero",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"net\":{\"tele_min\":0}}",
+        "err": "net.tele_min"
+      },
+      {
+        "name": "sha256_uppercase",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"fw\":{\"sha256\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}}",
+        "err": "fw.sha256"
+      }
+    ]
+  }
+}

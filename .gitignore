@@ -1,0 +1,9 @@
+fw/test/host/build/
+server/.venv/
+__pycache__/
+.pytest_cache/
+android/.gradle/
+android/.kotlin/
+android/build/
+android/core/build/
+android/local.properties
