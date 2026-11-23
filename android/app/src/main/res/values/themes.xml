@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Window only; Compose draws everything. Background matches the light surface so launch does not flash. -->
+    <style name="Theme.HeartBeacon" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window</item>
+    </style>
+    <color name="window">#FBF8F9</color>
+    <color name="accent">#9C2A4D</color>
+</resources>
