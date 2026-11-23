@@ -231,7 +231,11 @@ private fun PermissionsStep(next: () -> Unit) {
 
 @Composable
 private fun Need(title: String, why: String, ok: Boolean, allow: () -> Unit) {
-    ItemRow(title, why, trailing = {
+    Row(Modifier.fillMaxWidth().padding(vertical = Space.m), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = Space.l)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(why, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (ok) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 VectorIcon(Icons.Filled.CheckCircle, MaterialTheme.colorScheme.primary, 18.dp)
@@ -241,7 +245,7 @@ private fun Need(title: String, why: String, ok: Boolean, allow: () -> Unit) {
         } else {
             FilledTonalButton(onClick = allow) { Text("Allow") }
         }
-    })
+    }
 }
 
 /** The colour the hardware shows in its pairing window. A depiction of the device, not a UI accent. */
@@ -251,7 +255,7 @@ private val PairBlue @Composable get() =
 @Composable
 private fun HoldStep(error: String?, onFind: () -> Unit) {
     Box(Modifier.fillMaxWidth().padding(vertical = Space.xl), contentAlignment = Alignment.Center) {
-        LedRing(lit = true, color = PairBlue, size = 168.dp, pulse = true)
+        LedRing(lit = true, color = PairBlue, size = 168.dp, pulse = true, body = true)
     }
     Heading(
         "Hold its button for 5 seconds",
@@ -261,7 +265,7 @@ private fun HoldStep(error: String?, onFind: () -> Unit) {
     Spacer(Modifier.height(Space.s))
     Button(onClick = onFind, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Find my beacon") }
     Text(
-        "Android shows a list of nearby beacons. Pick the one named HB- followed by six letters and digits.",
+        "Android lists the beacons it can see. Pick the one whose name starts with HB-.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -270,7 +274,7 @@ private fun HoldStep(error: String?, onFind: () -> Unit) {
 @Composable
 private fun PairingStep() {
     Box(Modifier.fillMaxWidth().padding(vertical = Space.xl), contentAlignment = Alignment.Center) {
-        LedRing(lit = true, color = PairBlue, size = 168.dp, pulse = true)
+        LedRing(lit = true, color = PairBlue, size = 168.dp, pulse = true, body = true)
         CircularProgressIndicator(Modifier.size(56.dp), strokeWidth = 3.dp)
     }
     Heading("Pairing", "If Android asks to pair with your beacon, tap Pair.")
@@ -294,10 +298,10 @@ private fun WifiStep(vm: AddDeviceVm) {
                     Modifier
                         .fillMaxWidth()
                         .selectable(selected, role = Role.RadioButton) { vm.choose(n) }
-                        .padding(vertical = Space.xs),
+                        .padding(vertical = Space.m),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    RadioButton(selected = selected, onClick = null, modifier = Modifier.padding(Space.m))
+                    RadioButton(selected = selected, onClick = null, modifier = Modifier.padding(end = Space.l))
                     Column(Modifier.weight(1f)) {
                         Text(n.ssid, style = MaterialTheme.typography.bodyLarge)
                         Text(
@@ -307,7 +311,6 @@ private fun WifiStep(vm: AddDeviceVm) {
                         )
                     }
                     if (n.secure) VectorIcon(Icons.Outlined.Lock, MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.width(Space.m))
                 }
             }
         }

@@ -78,15 +78,17 @@ fun AppSettingsScreen(vm: AppSettingsVm, onBack: () -> Unit) {
 
     Scaffold(topBar = { BackBar("Settings", onBack) }) { pad ->
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + Space.xxl)) {
-            item { SectionTitle("Notify me about") }
+            item { SectionTitle("Notifications") }
             for (m in Mood.entries) {
                 item(key = m.wire) {
                     val label = when (m) {
-                        Mood.HEART -> "Hearts"
-                        Mood.SORRY -> "Sorrys"
-                        Mood.ANNOY -> "Annoys"
+                        Mood.HEART -> "Heart"
+                        Mood.SORRY -> "Sorry"
+                        Mood.ANNOY -> "Annoy"
                     }
-                    SwitchRow(label, null, local?.notify?.get(m) ?: true) { vm.notify(m, it) }
+                    SwitchRow(label, if (m == Mood.HEART) "When someone in your circle sends one" else null, local?.notify?.get(m) ?: true) {
+                        vm.notify(m, it)
+                    }
                 }
             }
 

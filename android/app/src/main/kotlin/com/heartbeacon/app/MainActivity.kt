@@ -60,7 +60,9 @@ class MainActivity : ComponentActivity() {
             step = intent.getIntExtra("step", 0)
             val presence = when (intent.getStringExtra("status")) {
                 "away" -> Presence.AwayWifi
-                "asleep" -> Presence.Asleep(System.currentTimeMillis() + 15 * 3_600_000L)
+                "asleep" -> Presence.Asleep(
+                    java.time.ZonedDateTime.now().plusDays(1).withHour(9).withMinute(0).withSecond(0).toInstant().toEpochMilli(),
+                )
                 "offline" -> Presence.Offline
                 else -> Presence.Near
             }

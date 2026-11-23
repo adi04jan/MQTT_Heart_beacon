@@ -130,8 +130,9 @@ fun VectorIcon(v: ImageVector, tint: Color, size: Dp = 18.dp) =
  * the hardware does in the pairing window.
  */
 @Composable
-fun LedRing(lit: Boolean, color: Color, size: Dp, modifier: Modifier = Modifier, pulse: Boolean = false) {
+fun LedRing(lit: Boolean, color: Color, size: Dp, modifier: Modifier = Modifier, pulse: Boolean = false, body: Boolean = false) {
     val dim = MaterialTheme.colorScheme.outlineVariant
+    val face = MaterialTheme.colorScheme.surfaceContainerHigh
     val alpha = if (pulse) {
         rememberInfiniteTransition(label = "pulse").animateFloat(
             initialValue = 0.35f,
@@ -144,8 +145,10 @@ fun LedRing(lit: Boolean, color: Color, size: Dp, modifier: Modifier = Modifier,
     }
     Canvas(modifier.size(size)) {
         val r = this.size.minDimension / 2
-        val dot = r * 0.17f
-        val ring = r - dot
+        // Drawn as the device (a round face with its pixels inset) when large, so it never reads as a spinner.
+        if (body) drawCircle(face, r)
+        val dot = r * if (body) 0.085f else 0.17f
+        val ring = if (body) r * 0.68f else r - dot
         repeat(9) { i ->
             val a = Math.toRadians(-90.0 + i * 40.0)
             val c = Offset(center.x + ring * cos(a).toFloat(), center.y + ring * sin(a).toFloat())

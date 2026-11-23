@@ -19,7 +19,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.OutlinedButton
@@ -107,7 +106,7 @@ fun DeviceSettingsScreen(vm: DeviceSettingsVm, onBack: () -> Unit, onRemoved: ()
             }
             item { Days(cur.days, cur.schedOn) { vm.update(cur.copy(days = it)) } }
             item {
-                Row(Modifier.padding(horizontal = Space.xs)) {
+                Row {
                     Column(Modifier.weight(1f)) { ItemRow("Wakes", hhmm(cur.start), onClick = { dialog = Dialog.START }) }
                     Column(Modifier.weight(1f)) { ItemRow("Sleeps", hhmm(cur.stop), onClick = { dialog = Dialog.STOP }) }
                 }
@@ -133,11 +132,10 @@ fun DeviceSettingsScreen(vm: DeviceSettingsVm, onBack: () -> Unit, onRemoved: ()
             }
 
             item {
-                HorizontalDivider(Modifier.padding(top = Space.xl, bottom = Space.l), color = MaterialTheme.colorScheme.outlineVariant)
                 OutlinedButton(
                     onClick = { dialog = Dialog.REMOVE },
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                    modifier = Modifier.padding(horizontal = Space.screen).fillMaxWidth().height(48.dp),
+                    modifier = Modifier.padding(start = Space.screen, end = Space.screen, top = Space.xxl).fillMaxWidth().height(48.dp),
                 ) { Text("Remove beacon") }
             }
         }
@@ -174,6 +172,10 @@ private fun Days(days: String, enabled: Boolean, onChange: (String) -> Unit) {
                 checked = on,
                 onCheckedChange = { c -> onChange(days.padEnd(7, '0').replaceRange(i, i + 1, if (c) "1" else "0")) },
                 shape = SegmentedButtonDefaults.itemShape(i, 7),
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                    activeContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ),
                 enabled = enabled,
                 icon = {},
                 label = { Text(l) },
