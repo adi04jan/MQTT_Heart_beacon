@@ -1,0 +1,74 @@
+package com.heartbeacon.app.data
+
+import kotlinx.coroutines.flow.StateFlow
+
+enum class Mood(val wire: String) { HEART("heart"), SORRY("sorry"), ANNOY("annoy") }
+
+/** The beacon card's one line of state. */
+sealed interface Presence {
+    data object Near : Presence
+    data object AwayWifi : Presence
+    data class Asleep(val untilEpochMs: Long?) : Presence
+    data object Offline : Presence
+}
+
+data class Beacon(
+    val did: String,
+    val name: String,
+    val presence: Presence,
+    val batteryPct: Int?,
+    val lastSeenEpochMs: Long?,
+)
+
+/** Delivery mark on an event the user sent (PROTOCOL `rcpt.st`). Null for events received. */
+enum class Mark { QUEUED, SHOWN, EXPIRED }
+
+data class Event(val id: String, val mood: Mood, val from: String?, val atEpochMs: Long, val mark: Mark?)
+
+enum class ServerLink { CONNECTED, CONNECTING, OFFLINE }
+
+data class Session(val user: String, val host: String)
+
+/** The user-editable part of config schema v1 (PROTOCOL.md section 7). */
+data class DeviceSettings(
+    val name: String,
+    val wifi: List<String>,
+    val useWifiAway: Boolean,
+    val schedOn: Boolean,
+    val days: String,
+    val start: String,
+    val stop: String,
+    val bright: Int,
+    val napWhenIdle: Boolean,
+    val fw: String,
+    val fwAvailable: String?,
+)
+
+data class WifiNet(val ssid: String, val rssi: Int, val secure: Boolean)
+
+/**
+ * Everything the screens need. [FakeRepo] renders the UI today; the real one sits on the link
+ * service, the router API and DataStore (M5/M6).
+ */
+interface HeartRepo {
+    val session: StateFlow<Session?>
+    val server: StateFlow<ServerLink>
+    val beacon: StateFlow<Beacon?>
+    val events: StateFlow<List<Event>>
+    val settings: StateFlow<DeviceSettings?>
+
+    /** Null on success, else what to tell the user. */
+    suspend fun login(user: String, pass: String, host: String): String?
+    fun logout()
+    fun send(mood: Mood)
+    fun update(s: DeviceSettings)
+
+    /** After the CDM chooser: bond, `get info`; returns the beacon's did, or null when pairing failed. */
+    suspend fun pair(mac: String?): String?
+    suspend fun scanWifi(): List<WifiNet>
+    /** Null when the beacon joined, else the beacon's reason. */
+    suspend fun joinWifi(ssid: String, psk: String): String?
+    fun forgetWifi(ssid: String)
+    suspend fun claim(did: String, name: String)
+    fun remove()
+}

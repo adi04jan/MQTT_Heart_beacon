@@ -1,13 +1,37 @@
-# Same pins as AI-Notes-recorder/android/gradle/libs.versions.toml (Gradle 8.11.1 wrapper).
-# M5 adds AGP 8.9.1 and the :app module.
+# Pins follow AI-Notes-recorder/android/gradle/libs.versions.toml (Gradle 8.11.1 wrapper).
 [versions]
+agp = "8.9.1"
 kotlin = "2.1.20"
+minSdk = "34"
+targetSdk = "36"
+compileSdk = "36"
 serializationJson = "1.7.3"
+coroutines = "1.9.0"
+composeBom = "2025.01.00"
+activityCompose = "1.9.3"
+lifecycle = "2.8.7"
+datastore = "1.1.7"
+paho = "1.2.5"
 junit4 = "4.13.2"
 
 [libraries]
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serializationJson" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
+compose-material3 = { module = "androidx.compose.material3:material3" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
+androidx-lifecycle-service = { module = "androidx.lifecycle:lifecycle-service", version.ref = "lifecycle" }
+androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
+paho-mqttv5 = { module = "org.eclipse.paho:org.eclipse.paho.mqttv5.client", version.ref = "paho" }
 junit4 = { module = "junit:junit", version.ref = "junit4" }
 
 [plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

@@ -7,3 +7,4 @@ android/.kotlin/
 android/build/
 android/core/build/
 android/local.properties
+android/app/build/
