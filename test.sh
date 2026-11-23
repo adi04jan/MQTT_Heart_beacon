@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Every hardware-free test: firmware host (CMake + ctest), server (pytest), Android :core (Gradle).
-# Needs cmake, a C compiler, python3 and a JDK >= 17. Pytest goes into server/.venv on first run.
+# Needs cmake, a C compiler, python3 (>= 3.11) and a JDK >= 17. Server deps (server/pyproject.toml) go into
+# server/.venv on first run.
 set -euo pipefail
 root="$(cd "$(dirname "$0")" && pwd)"
 
@@ -18,8 +19,9 @@ command -v python3 >/dev/null 2>&1 || py=python
 [ -d "$venv" ] || "$py" -m venv "$venv"
 vpy="$venv/bin/python"
 [ -x "$vpy" ] || vpy="$venv/Scripts/python.exe"
-"$vpy" -m pip install -q --disable-pip-version-check "pytest>=8"
-(cd "$root/server" && "$vpy" -m pytest -q)
+deps=$(cd "$root/server" && "$vpy" -c "import tomllib; p = tomllib.load(open('pyproject.toml', 'rb')); print(' '.join(p['project']['dependencies'] + p['dependency-groups']['dev']))")
+"$vpy" -m pip install -q --disable-pip-version-check $deps
+(cd "$root/server" && "$vpy" -m pytest -q -rs)
 
 echo "== android: :core tests"
 if [ -n "${JAVA_HOME:-}" ] && [ ! -d "$JAVA_HOME" ]; then

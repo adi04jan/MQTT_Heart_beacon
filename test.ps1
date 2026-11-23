@@ -1,5 +1,6 @@
 # Every hardware-free test: firmware host (CMake + ctest), server (pytest), Android :core (Gradle).
-# Needs cmake, gcc (MinGW) + ninja or mingw32-make, python and a JDK >= 17. Pytest goes into server\.venv.
+# Needs cmake, gcc (MinGW) + ninja or mingw32-make, python >= 3.11 and a JDK >= 17. Server deps
+# (server\pyproject.toml) go into server\.venv.
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
@@ -20,9 +21,12 @@ Write-Host '== server: pytest'
 $venv = Join-Path $root 'server/.venv'
 if (-not (Test-Path $venv)) { Invoke-Checked { python -m venv $venv } }
 $py = Join-Path $venv 'Scripts/python.exe'
-Invoke-Checked { & $py -m pip install -q --disable-pip-version-check 'pytest>=8' }
 Push-Location (Join-Path $root 'server')
-try { Invoke-Checked { & $py -m pytest -q } } finally { Pop-Location }
+try {
+    $deps = (& $py -c "import tomllib; p = tomllib.load(open('pyproject.toml', 'rb')); print(' '.join(p['project']['dependencies'] + p['dependency-groups']['dev']))") -split ' '
+    Invoke-Checked { & $py -m pip install -q --disable-pip-version-check @deps }
+    Invoke-Checked { & $py -m pytest -q -rs }
+} finally { Pop-Location }
 
 Write-Host '== android: :core tests'
 $savedJavaHome = $env:JAVA_HOME

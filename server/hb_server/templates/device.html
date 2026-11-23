@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}{{ d.did }}{% endblock %}
+{% block style %}
+.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.75rem; }
+.head h1 .mono { font-size: 1.25rem; }
+.facts { display: flex; flex-wrap: wrap; gap: 0.25rem 1.75rem; margin: 0.75rem 0 0; padding: 0; list-style: none; }
+.facts li { color: var(--muted); }
+.facts b { color: var(--ink); font-weight: 500; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 18rem; gap: 3rem; margin-top: 2rem; align-items: start; }
+fieldset { border: 0; margin: 0; padding: 1.25rem 0 1.5rem; border-top: 1px solid var(--line); min-width: 0; }
+fieldset:first-of-type { border-top: 0; padding-top: 0; }
+legend { float: left; width: 100%; padding: 0; margin-bottom: 0.875rem; font-size: 1rem; font-weight: 600; }
+legend + * { clear: both; }
+.rows { display: grid; grid-template-columns: 13rem minmax(0, 1fr); gap: 0.875rem 1.5rem; align-items: center; }
+.rows > .lbl { font-weight: 500; }
+.rows > .lbl .hint { display: block; font-weight: 400; }
+.rows .err { display: block; color: var(--bad); font-size: 0.8125rem; margin-top: 0.25rem; }
+.days { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.day { position: relative; }
+.day input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.day span {
+  display: inline-grid; place-items: center; min-width: 2.5rem; height: 2rem; padding: 0 0.375rem;
+  border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface);
+  color: var(--muted); font-size: 0.8125rem; font-weight: 500;
+  transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out;
+}
+.day:hover span { border-color: var(--muted); }
+.day input:checked + span { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); }
+.day input:focus-visible + span { box-shadow: 0 0 0 3px var(--ring); border-color: var(--accent); }
+.savebar {
+  position: sticky; bottom: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem;
+  margin-top: 0.5rem; padding: 0.875rem 0; background: var(--bg); border-top: 1px solid var(--line);
+}
+.savebar .hint { flex: 1 1 16rem; }
+aside { position: sticky; top: 1.5rem; display: grid; gap: 1.75rem; }
+aside section { margin: 0; }
+aside h2 { margin-bottom: 0.5rem; }
+aside p { margin: 0 0 0.75rem; color: var(--muted); }
+aside select { max-width: none; margin-bottom: 0.625rem; }
+details { border-top: 1px solid var(--line); padding-top: 1rem; }
+summary { cursor: pointer; color: var(--bad); font-weight: 500; width: fit-content; }
+summary:hover { text-decoration: underline; text-underline-offset: 0.22em; }
+details[open] summary { margin-bottom: 0.625rem; }
+@media (max-width: 60rem) {
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 2rem; }
+  aside { position: static; order: -1; }
+}
+@media (max-width: 36rem) {
+  .rows { grid-template-columns: minmax(0, 1fr); gap: 0.375rem; }
+  .rows > .ctl { margin-bottom: 0.625rem; }
+}
+{% endblock %}
+{% block main %}
+<div class="crumbs"><a href="/">Beacons</a> / {{ d.did }}</div>
+<div class="head">
+  <h1><span class="mono">{{ d.did }}</span></h1>
+  {% if cfg.name %}<span class="muted">{{ cfg.name }}</span>{% endif %}
+</div>
+<ul class="facts">
+  <li>Owner <b>{{ d.owner or "nobody" }}</b></li>
+  <li>State <b>{% if not d.claimed %}unclaimed{% elif st.st %}{{ st.st }}{% if st.path %} via {{ "phone" if st.path == "ble" else "Wi-Fi" }}{% endif %}{% else %}not seen yet{% endif %}</b></li>
+  {% if tele.mv %}<li>Battery <b class="num">{{ "%.2f"|format(tele.mv / 1000) }} V</b></li>{% endif %}
+  {% if tele.fw %}<li>Firmware <b class="mono">{{ tele.fw }}</b></li>{% endif %}
+  <li>Config <b class="num">{% if d.cfg_n %}n = {{ d.cfg_n }}{% else %}never published{% endif %}</b></li>
+  <li>Last seen <b>{{ st.last_seen|ago }}</b></li>
+</ul>
+
+{% if saved %}<div class="notice good" role="status"><strong>Saved and published</strong>Config n = {{ saved }} is signed
+  and waiting for the beacon (retained on its config topic).</div>{% endif %}
+{% if released %}<div class="notice good" role="status"><strong>Released</strong>Its credential and settings are gone.
+  The assigned user can add it again from the app.</div>{% endif %}
+{% if error %}<div class="notice bad" role="alert"><strong>Not saved</strong>
+  {% if error == "too_big" %}{{ hints.too_big }}{% else %}<a href="#f-{{ error }}">{{ label(error) }}</a> was not accepted.
+  {{ hints.get(error, "Check its range in PROTOCOL.md, section 7.") }}{% endif %}</div>{% endif %}
+
+<div class="layout">
+  <form method="post" action="/d/{{ d.did }}" novalidate>
+    {% for block, heading, fields in FORM %}
+    <fieldset>
+      <legend>{{ heading }}</legend>
+      <div class="rows">
+      {% for key, text, hint in fields %}
+        {% set k = kind(key) %}{% set v = get(cfg, key) %}{% set bad = error == key %}
+        {% if k == "bool" %}
+          <label class="lbl" for="f-{{ key }}">{{ text }}{% if hint %}<span class="hint">{{ hint }}</span>{% endif %}</label>
+          <span class="ctl"><input type="checkbox" id="f-{{ key }}" name="{{ key }}" {% if v %}checked{% endif %}></span>
+        {% elif k == "days" %}
+          <span class="lbl" id="l-{{ key }}">{{ text }}</span>
+          <span class="ctl"><span class="days" role="group" aria-labelledby="l-{{ key }}" id="f-{{ key }}">
+            {% for name in DAYS %}<label class="day"><input type="checkbox" name="sched.days.{{ loop.index0 }}" {% if v[loop.index0] == "1" %}checked{% endif %}><span>{{ name }}</span></label>{% endfor %}
+          </span></span>
+        {% else %}
+          <label class="lbl" for="f-{{ key }}">{{ text }}{% if hint %}<span class="hint">{{ hint }}</span>{% endif %}</label>
+          <span class="ctl">
+            <input id="f-{{ key }}" name="{{ key }}"
+              {% if k == "int" %}type="number" inputmode="numeric" step="1"{% elif k == "time" %}type="time" step="60"{% else %}type="text" spellcheck="false"{% endif %}
+              {% if key in ("fw.sha256", "fw.path", "srv.hosts") %}class="mono"{% endif %}
+              value="{{ v|join(', ') if v is iterable and v is not string else v }}"
+              {% if bad %}aria-invalid="true" aria-describedby="e-{{ key }}" autofocus{% endif %}>
+            {% if bad %}<span class="err" id="e-{{ key }}">{{ hints.get(key, "Out of range or not a valid value.") }}</span>{% endif %}
+          </span>
+        {% endif %}
+      {% endfor %}
+      </div>
+    </fieldset>
+    {% endfor %}
+    <div class="savebar">
+      <button class="btn" type="submit">Save and publish</button>
+      <span class="hint">Signs config n = {{ d.cfg_n + 1 }} and publishes it to the beacon. The owner sees the same
+        values in the app.</span>
+    </div>
+  </form>
+
+  <aside>
+    <section>
+      <h2>Who may claim it</h2>
+      <p>Only the assigned user can add this beacon in the app.</p>
+      <form method="post" action="/d/{{ d.did }}/assign">
+        <label class="field"><span class="hint">Assigned user</span>
+          <select name="assign">
+            <option value="">Nobody</option>
+            {% for u in users %}<option value="{{ u.uid }}" {% if u.uid == d.assigned_uid %}selected{% endif %}>{{ u.name }} ({{ u.uid }})</option>{% endfor %}
+          </select></label>
+        <button class="btn quiet" type="submit">Save assignment</button>
+      </form>
+    </section>
+    {% if d.owner or d.claimed %}
+    <details>
+      <summary>Release this beacon</summary>
+      <p>Deletes its broker credential and its settings, so the beacon drops off at the next broker reload and
+        the assigned user can claim it fresh. Config numbering carries on.</p>
+      <form method="post" action="/d/{{ d.did }}/release"><button class="btn danger" type="submit">Release {{ d.did }}</button></form>
+    </details>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

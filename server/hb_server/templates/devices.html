@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% macro state(d) -%}
+  {%- set s = d.st -%}
+  {%- if not d.claimed -%}<span class="state">Unclaimed</span>
+  {%- elif s == "near" and d.live -%}<span class="state live">Near, via phone</span>
+  {%- elif s == "away" and d.live -%}<span class="state live">On Wi-Fi</span>
+  {%- elif s in ("sleep", "nap") -%}<span class="state asleep">Asleep{% if d.wake %} until {{ d.wake|when }}{% endif %}</span>
+  {%- elif s == "lowbatt" -%}<span class="state bad">Battery flat</span>
+  {%- elif s == "pairing" -%}<span class="state pairing">Pairing</span>
+  {%- elif s == "lost" -%}<span class="state trouble">Connection lost</span>
+  {%- elif s -%}<span class="state trouble">Unreachable</span>
+  {%- else -%}<span class="state">Not seen yet</span>
+  {%- endif -%}
+{%- endmacro %}
+{% block style %}
+.lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2.5rem 3rem; margin-top: 2.5rem; }
+.lower section { margin: 0; padding-top: 1.25rem; border-top: 1px solid var(--line); }
+.lower p.hint { margin: -0.375rem 0 1rem; max-width: 34rem; }
+.row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; }
+.row .field { flex: 1 1 9rem; }
+.row .field input, .row .field select { max-width: none; }
+.users { margin-top: 1.25rem; }
+@media (max-width: 52rem) { .lower { grid-template-columns: minmax(0, 1fr); } }
+{% endblock %}
+{% block main %}
+<h1>Beacons</h1>
+<p class="lede">{{ devices|length }} registered, {{ devices|selectattr("claimed")|list|length }} claimed. A beacon can be
+  claimed only by the user it is assigned to.</p>
+
+<section>
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>Beacon</th><th>Owner</th><th>State</th><th class="num">Battery</th><th>Firmware</th>
+        <th class="num">Config</th><th>Last seen</th>
+      </tr></thead>
+      <tbody>
+      {% for d in devices %}
+        <tr>
+          <td><a class="mono" href="/d/{{ d.did }}">{{ d.did }}</a>{% if d.name %}<span class="sub">{{ d.name }}</span>{% endif %}</td>
+          <td>{{ d.owner or "—" }}{% if d.assigned_uid and d.assigned_uid != d.owner %}<span class="sub">assigned to {{ d.assigned_uid }}</span>{% elif not d.assigned_uid %}<span class="sub">not assigned</span>{% endif %}</td>
+          <td>{{ state(d) }}</td>
+          <td class="num">{% if d.mv %}{{ "%.2f"|format(d.mv / 1000) }} V{% if d.pct is not none %}<span class="sub">{{ d.pct }} %</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td>{% if d.fw %}<span class="mono">{{ d.fw }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td class="num">{% if d.cfg_n %}n = {{ d.cfg_n }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td title="{{ d.last_seen|when }}">{{ d.last_seen|ago }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="empty">No beacons yet. Register one below with its did (the Bluetooth name on the
+          sticker, HB- and six hex digits) and the user who will add it in the app.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="lower">
+  <section id="register">
+    <h2>Register a beacon</h2>
+    <p class="hint">The assigned user then adds it in the app; nobody else can claim it.</p>
+    {% if error %}<div class="notice bad" role="alert"><strong>Not registered</strong>{{ error }}</div>{% endif %}
+    <form method="post" action="/register" class="row" style="margin-top: 1rem">
+      <label class="field"><span>Did</span>
+        <input type="text" name="did" required placeholder="HB-3FA2C1" pattern="[Hh][Bb]-[0-9A-Fa-f]{6}"
+               autocomplete="off" spellcheck="false" class="mono" value="{{ form.did if form else '' }}"></label>
+      <label class="field"><span>Assign to</span>
+        <select name="assign" required>
+          <option value="">Choose a user</option>
+          {% for u in users %}<option value="{{ u.uid }}" {% if form and form.assign == u.uid %}selected{% endif %}>{{ u.name }} ({{ u.uid }})</option>{% endfor %}
+        </select></label>
+      <button class="btn" type="submit">Register</button>
+    </form>
+  </section>
+
+  <section id="users">
+    <h2>Users</h2>
+    <p class="hint">Everyone here is in one circle: a heart from any of them reaches everyone else.</p>
+    {% if new_user %}
+      <div class="notice good" role="status"><strong>{{ new_user.uid }} can log in now</strong>
+        Password, shown once: <span class="secret">{{ new_user.pw }}</span></div>
+    {% endif %}
+    {% if user_error %}<div class="notice bad" role="alert"><strong>User not added</strong>{{ user_error }}</div>{% endif %}
+    {% if users %}
+    <div class="scroll users">
+      <table>
+        <thead><tr><th>User</th><th>Name</th><th>Circle</th></tr></thead>
+        <tbody>
+        {% for u in users %}
+          <tr><td class="mono">{{ u.uid }}</td><td>{{ u.name }}{% if u.disabled %} <span class="muted">(disabled)</span>{% endif %}</td><td>{{ u.circle }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    <form method="post" action="/users" class="row" style="margin-top: 1rem">
+      <label class="field"><span>Login</span>
+        <input type="text" name="uid" required pattern="[a-z][a-z0-9_]{0,31}" placeholder="aditya" autocomplete="off"
+               spellcheck="false" value="{{ uform.uid if uform else '' }}"></label>
+      <label class="field"><span>Display name</span>
+        <input type="text" name="name" required maxlength="32" placeholder="Aditya" value="{{ uform.name if uform else '' }}"></label>
+      <button class="btn quiet" type="submit">Add user</button>
+    </form>
+    <p class="hint" style="margin-top: 0.5rem">The password is generated (20 characters) and shown once.</p>
+  </section>
+</div>
+{% endblock %}

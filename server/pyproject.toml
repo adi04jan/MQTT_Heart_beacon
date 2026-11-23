@@ -2,10 +2,17 @@
 name = "hb-server"
 version = "0.0.0"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "fastapi==0.165.0",
+    "uvicorn==0.54.0",
+    "jinja2==3.1.6",
+    "python-multipart==0.0.34",
+    "cryptography==50.0.2",
+    "paho-mqtt==2.2.0",
+]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest==9.2.0", "httpx2==2.16.2"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
