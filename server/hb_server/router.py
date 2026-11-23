@@ -29,7 +29,10 @@ from . import models
 
 log = logging.getLogger("hb.router")
 KINDS = frozenset({"heart", "sorry", "annoy"})
-TELE_KEYS = frozenset({"mv", "pct", "rssi", "fw", "hw", "cfg", "up_s", "rst", "heap"})
+# What a beacon may put in `tele` (anything else, or out of range, is dropped before it is stored or shown).
+TELE_INTS = {"mv": (0, 10_000), "pct": (0, 100), "rssi": (-150, 0), "cfg": (0, 2**31 - 1),
+             "up_s": (0, 2**32 - 1), "heap": (0, 2**32 - 1), "rst": (0, 2**32 - 1)}
+TELE_STRS = frozenset({"fw", "hw", "rst"})  # <= 32 characters
 RETRY_S = 10
 EXPIRE_S = 24 * 3600
 BURST_S = 3
@@ -153,6 +156,16 @@ def route(ev: Msg | Tick | Directory, st: State) -> list[Pub]:
     return out
 
 
+def _tele(body: dict) -> dict:
+    out = {}
+    for k, v in body.items():
+        if k in TELE_INTS and models._is_int(v) and TELE_INTS[k][0] <= v <= TELE_INTS[k][1]:
+            out[k] = v
+        elif k in TELE_STRS and isinstance(v, str) and len(v) <= 32:
+            out[k] = v
+    return out
+
+
 def _str(body: dict, key: str) -> str | None:
     v = body.get(key)
     return v if isinstance(v, str) else None
@@ -175,7 +188,7 @@ def _from_beacon(st, did, env, path, now, out):
     elif env.t == "shown":
         _shown(st, did, env.id, now, out)
     elif env.t == "tele":
-        b.tele = {k: v for k, v in env.body.items() if k in TELE_KEYS and type(v) in (int, float, str)}
+        b.tele = _tele(env.body)
     elif env.t not in models.TYPES:
         _send(st, b, path, models.unknown_t_response(env, st.new_id(), now), now, out)
 
@@ -184,8 +197,8 @@ def _beacon_state(st, b, body, path, now, out):
     s = (_str(body, "st") or "").lower()
     p = _str(body, "path") if _str(body, "path") in ("wifi", "ble") else path
     b.st = s
-    if models._is_int(body.get("wake")):
-        b.wake = body["wake"]
+    wake = body.get("wake")
+    b.wake = wake if models._is_int(wake) and 0 <= wake <= 0xFFFFFFFF else 0  # epoch s, same range as `ts`
     if s == "lost":  # LWT: only the WiFi session died
         _links(st, b, now, out, wifi=False)
     elif s in UP_STATES:

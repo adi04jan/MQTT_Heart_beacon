@@ -11,6 +11,7 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from . import api, models
+from .router import _tele
 
 IST = timezone(timedelta(minutes=330), "IST")
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
@@ -105,7 +106,10 @@ def form_to_config(form, base: dict) -> tuple[dict, str | None]:
 
 
 def _when(ts) -> str:
-    return datetime.fromtimestamp(ts, IST).strftime("%d %b %H:%M") if ts else ""
+    try:
+        return datetime.fromtimestamp(ts, IST).strftime("%d %b %H:%M") if ts else ""
+    except (OverflowError, ValueError, OSError, TypeError):
+        return ""
 
 
 def _ago(ts, now) -> str:
@@ -143,7 +147,7 @@ def create_admin(ctx: api.Ctx) -> FastAPI:
         rows = []
         for r in db.q("SELECT * FROM device ORDER BY did"):
             st = json.loads(r["status"])
-            tele = st.get("tele") or {}
+            tele = _tele(st.get("tele") or {})  # rows not written by the router get the same filter
             rows.append({**dict(r), "st": st.get("st", ""), "path": st.get("path"),
                          "live": st.get("wifi") or st.get("ble"), "last_seen": st.get("last_seen", 0),
                          "wake": st.get("wake", 0), "mv": tele.get("mv"), "pct": tele.get("pct"),
@@ -187,7 +191,7 @@ def create_admin(ctx: api.Ctx) -> FastAPI:
             return PlainTextResponse("no such beacon", status_code=404)
         st = json.loads(row["status"])
         return tpl.TemplateResponse(request, "device.html", {
-            "d": dict(row), "st": st, "tele": st.get("tele") or {}, "users": users(),
+            "d": dict(row), "st": st, "tele": _tele(st.get("tele") or {}), "users": users(),
             "cfg": cfg or api.current_config(ctx, did), "error": error,
             "saved": request.query_params.get("saved"), "released": "released" in request.query_params},
             status_code=status)

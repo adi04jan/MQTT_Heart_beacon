@@ -93,6 +93,26 @@ def test_config_errors_name_the_field_and_keep_the_input(e):
     assert r.status_code == 400 and 'value="three"' in r.text and 'id="e-ble.latency"' in r.text
 
 
+def test_hostile_beacon_state_and_tele_cannot_break_the_pages(e):
+    from hb_server import router
+    api.register(e.ctx, A, "alice")
+    e.ctx.db.x("UPDATE device SET owner = 'alice', claimed = 1 WHERE did = ?", (A,))
+    st = router.load_state(e.ctx.db, 1000)
+    raw = (b'{"v":1,"t":"state","id":"00000000000000a1","ts":0,"st":"sleep","path":"wifi","wake":1e30}',
+           b'{"v":1,"t":"tele","id":"00000000000000a2","ts":0,"mv":"x","pct":1e9,"rssi":-60,"fw":"2.0.0"}')
+    for topic, payload in zip((f"hb/v1/d/{A}/state", f"hb/v1/d/{A}/up"), raw):
+        router.route(router.Msg(topic, payload, 1000), st)
+    router.save_state(e.ctx.db, st)
+    status = json.loads(e.ctx.db.one("SELECT status FROM device WHERE did = ?", (A,))["status"])
+    assert status["wake"] == 0 and status["tele"] == {"rssi": -60, "fw": "2.0.0"}
+    assert e.c.get("/").status_code == 200 and e.c.get(f"/d/{A}").status_code == 200
+    # a row written by something else still renders
+    e.ctx.db.x("UPDATE device SET status = ? WHERE did = ?",
+               (json.dumps({"st": "sleep", "wake": 10**30, "tele": {"mv": "x", "pct": [1]}}), A))
+    assert e.c.get("/").status_code == 200 and e.c.get(f"/d/{A}").status_code == 200
+    assert admin._when(10**30) == "" and admin._when(float("nan")) == ""
+
+
 def test_assign_and_release(e):
     api.register(e.ctx, A, "alice")
     e.ctx.db.x("UPDATE device SET owner = 'alice', claimed = 1 WHERE did = ?", (A,))

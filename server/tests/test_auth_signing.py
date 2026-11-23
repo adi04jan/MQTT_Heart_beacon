@@ -1,5 +1,7 @@
 """Mosquitto 1.6 password-file format, login hashes, config signatures."""
 import json
+import os
+import stat
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -35,6 +37,21 @@ def test_write_passwd(tmp_path):
     for bad in ("a:b", "a+", "#", "x/y", ""):
         with pytest.raises(ValueError):
             auth.write_passwd(p, [(bad, auth.mosq_hash("x"))])
+
+
+def test_secret_files_are_private_from_creation(tmp_path):
+    from hb_server.__main__ import _router_pass
+    p = tmp_path / "router.pass"
+    first = _router_pass(str(p))
+    assert len(first) >= 43 and _router_pass(str(p)) == first  # made once, then reused
+    auth.write_passwd(tmp_path / "passwd", [("router", auth.mosq_hash(first))])
+    (tmp_path / "passwd.tmp").write_text("stale")  # a leftover from a crash does not block the next write
+    auth.write_passwd(tmp_path / "passwd", [("router", auth.mosq_hash(first))])
+    with pytest.raises(FileExistsError):
+        auth.write_private(p, "x")  # never reopens an existing file
+    if os.name == "nt":
+        pytest.skip("POSIX file modes; on Windows the mode is advisory")
+    assert [stat.S_IMODE(os.stat(f).st_mode) for f in (p, tmp_path / "passwd")] == [0o600, 0o600]
 
 
 def test_login_password_hash():

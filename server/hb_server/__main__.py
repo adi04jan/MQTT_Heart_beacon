@@ -16,8 +16,7 @@ def _router_pass(path: str) -> str:
     """The router's broker password, made once and kept beside the DB so the CLI can rewrite passwd too."""
     p = Path(path)
     if not p.exists():
-        p.write_text(auth.new_secret(), encoding="utf-8")
-        os.chmod(p, 0o600)
+        auth.write_private(p, auth.new_secret())
     return p.read_text(encoding="utf-8").strip()
 
 

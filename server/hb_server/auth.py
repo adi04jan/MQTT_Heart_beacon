@@ -58,6 +58,14 @@ def mosq_check(pw: str, stored: str) -> bool:
     return hmac.compare_digest(mosq_hash(pw, base64.b64decode(parts[2])), stored)
 
 
+def write_private(path: str | Path, text: str) -> None:
+    """Create `path` with mode 0600 from the first byte (no readable window), then write. Fails if it exists.
+    On Windows the mode is advisory; same code path."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+
 def write_passwd(path: str | Path, entries: list[tuple[str, str]]) -> None:
     """Atomically replace the broker's password file with `user:hash` lines."""
     path = Path(path)
@@ -65,8 +73,8 @@ def write_passwd(path: str | Path, entries: list[tuple[str, str]]) -> None:
         if not user or any(c in user for c in ":\n+#/") or not h.startswith("$6$"):
             raise ValueError(f"bad passwd entry for {user!r}")
     tmp = path.with_suffix(".tmp")
-    tmp.write_text("".join(f"{u}:{h}\n" for u, h in entries), encoding="utf-8", newline="\n")
-    os.chmod(tmp, 0o600)
+    tmp.unlink(missing_ok=True)  # a leftover from a crash
+    write_private(tmp, "".join(f"{u}:{h}\n" for u, h in entries))
     os.replace(tmp, path)
 
 
