@@ -15,7 +15,12 @@ commands ("miss", "sorry", "annoy", "details", "go_deep_sleep") light up or cont
   (`/usr/local/bin/mqtt_to_telegram.sh`, `/etc/systemd/system/telegram_heart.service`). The script also holds
   placeholder credentials (bot token, Telegram user IDs, MQTT creds).
 
-No tests, no CI, no build system beyond arduino-cli / Arduino IDE.
+- `Code/beacon_logic.h` + `Code/test/`: hardware-free firmware logic and its host test.
+- `docs/plans/`: v2 plan and the progress checklist (see "v2" below).
+
+Two lines of work: **v1** (this Arduino sketch, released as `0.1.x`, branch `feature/v1.2-wifi-power-queue`) keeps
+the two deployed beacons working; **v2** (ESP-IDF rewrite + own server + Android app) lives on `feature/v2`.
+No CI.
 
 ## Build / flash
 
@@ -42,9 +47,21 @@ Host tests (pure logic in `Code/beacon_logic.h`: button classifier, battery mapp
 g++ -std=c++17 -Wall -Wextra -Werror -o /tmp/test_logic Code/test/test_logic.cpp && /tmp/test_logic
 ```
 
-Bench testing without disturbing users: append `#undef MQTT_TOPIC` / `#define MQTT_TOPIC "heart_beacon/bench_com6"`
-to the build copy's `credential.h`. The Telegram bridge and other beacons only listen on the real topic. Every boot
-on the real topic publishes `Online` + details, which the bridge forwards to Telegram users.
+## Bench
+
+- Bench unit: the beacon on **COM6** (ESP32-C3 native USB-Serial/JTAG, VID 303A PID 1001). Other COM ports on
+  this PC belong to other projects: never open, reset or flash them. Always pass `-p COM6` explicitly.
+- Isolate tests from users: append `#undef MQTT_TOPIC` / `#define MQTT_TOPIC "heart_beacon/bench_com6"` to the
+  build copy's `credential.h`. The Telegram bridge and the other beacon only listen on the real topic. Every boot
+  on the real topic publishes `Online` + details, which the bridge forwards to Telegram users as "Miss you", so
+  production flashes need the user's OK.
+- Back up before flashing an in-use unit, keeping the chip in the bootloader so the old firmware never boots:
+  `esptool --chip esp32c3 -p COM6 --after no-reset read-flash 0 0x400000 <file>` (esptool lives in the Arduino
+  `esptool_py` tools dir).
+- Serial: open with DTR/RTS deasserted to read without resetting. A plain RTS pulse does **not** reset this
+  USB-Serial/JTAG; use `esptool ... --after hard-reset chip-id` to reboot it. The port disappears in deep sleep.
+- Verify a deploy: boot banner `Heart beacon <ver>` on serial, then the device's own publishes on the topic with
+  `retain=0` (`mosquitto_sub -F '%I retain=%r %p'`; `mosquitto-clients` is in WSL Ubuntu-20.04).
 
 ## OTA
 
@@ -74,7 +91,7 @@ must match exactly. The device accepts both capitalisations for Sorry/Annoy/Deta
 | Firmware constant | Value | Sent by | Device reaction |
 |---|---|---|---|
 | `MQTT_MSG_1` | `Miss you` | button tap, bridge "miss" | red heartbeat |
-| `MQTT_MSG_2` | `Online` | device on every MQTT (re)connect | green heartbeat |
+| `MQTT_MSG_2` | `Online` | device on every MQTT (re)connect | green heartbeat (not for its own echo) |
 | `MQTT_MSG_3` | `BATT_STATUS` | device, periodic (~30 min) | none |
 | `MQTT_MSG_4` | `DEEP SLEEP` | device, right before deep sleep | none |
 | `MQTT_GO_SLEEP` | `GO_DEEP_SLEEP` | bridge | purple pulse, then deep sleep |
@@ -116,13 +133,31 @@ deep sleep is not µA on this hardware.
 
 ## v2
 
-`docs/plans/2026-11-23-heart-beacon-v2-plan.md`: ESP-IDF rewrite, own TLS MQTT + config server, Android BLE app.
+- Plan: `docs/plans/2026-11-23-heart-beacon-v2-plan.md` (protocol contract, power states, milestones M0-M9,
+  the user's answers). Progress: `docs/plans/CHECKLIST.md`; tick a box only after its bench check passed.
+- Branch `feature/v2`. Firmware: ESP-IDF **v5.3.3** at `C:\esp\esp-idf` (PowerShell: `. C:\esp\esp-idf\export.ps1`),
+  pure-C `hb_core` with host tests; Android 14+ Kotlin/Compose app; Python server.
+- Fixed inputs from the user: 2 beacons, both owners on Android 14+; office WiFi is plain password with ports open;
+  no hardware change (LEDs stay ungated, so battery life is days); one circle, everyone receives; missed hearts
+  play once on wake (coalesced, 24 h); FCM decided after measuring; server = the existing home server reached by
+  its public IP (no domain, not the old address).
+- Reference for BLE, background service and test rigs: `D:\Personal\Project\AI-Notes-recorder` (read-only).
+
+## Broker and server
+
+The Mosquitto broker runs on the user's home server (the bridge reaches it as `localhost`). It is **shared with
+the water-tank sensor system**: broker changes go through the user, keep that system working, and prefer
+`systemctl reload mosquitto` over a restart. Pending broker change for queued beacon-to-beacon hearts:
+`queue_qos0_messages true` (leave `max_queued_messages` at its global default).
 
 ## Bridge service (server)
 
 `mqtt_to_telegram.sh` runs two loops: `mqtt_listener` (background, `mosquitto_sub` piped into `jq`) and
 `telegram_poller` (foreground, `getUpdates` long-poll + 10 s sleep). Admin vs. regular users is decided by the
 `USERS` map plus a hard-coded admin ID inside `mqtt_listener`; keep those consistent when editing.
+Known defects (bridge is retired in v2, so left as is): non-admin users get "❤️ Miss you" for *every* device
+message (Online, BATT_STATUS, DEEP SLEEP, details); any Telegram user can send commands; if the broker restarts,
+`mosquitto_sub` exits but the service stays active, so run `systemctl restart telegram_heart` after a broker restart.
 
 Deploy (server needs `mosquitto-clients`, `jq`, `curl`):
 
@@ -135,5 +170,6 @@ journalctl -u telegram_heart -f
 
 ## Repo conventions
 
-Feature branches (`feature/...`) merged into `main` via GitHub PRs. Existing commits carry no Co-Authored-By
-or Claude trailers.
+Feature branches (`feature/...`) merged into `main` via GitHub PRs. Commit messages are plain sentences with no
+Co-Authored-By or Claude trailers. `Code/MQTT_Heart_Beacon.ino` is stored with CRLF; keep it CRLF (`unix2dos`) so
+diffs stay small.
