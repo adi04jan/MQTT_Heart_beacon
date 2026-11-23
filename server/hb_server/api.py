@@ -6,12 +6,13 @@ import hashlib
 import json
 import re
 import secrets
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -20,6 +21,7 @@ from .db import Db
 from .router import Pub
 
 SESSION_S = 365 * 24 * 3600
+RATE = (10, 600)  # attempts per key (client IP, user) per window in seconds, for /login and /devices/claim
 UID = re.compile(r"[a-z][a-z0-9_]{0,31}")  # never collides with a did (HB-XXXXXX) in the ACL's %u patterns
 DID = re.compile(r"HB-[0-9A-F]{6}")
 FW_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}")
@@ -61,10 +63,20 @@ def add_user(ctx: Ctx, uid: str, name: str, circle: str = "home") -> str:
     return pw
 
 
-def register(ctx: Ctx, did: str) -> None:
+def register(ctx: Ctx, did: str, assign: str | None = None) -> None:
     if not DID.fullmatch(did):
         raise ValueError("did must be HB- and 6 uppercase hex digits")
     ctx.db.x("INSERT OR IGNORE INTO device (did, registered) VALUES (?, ?)", (did, int(ctx.clock())))
+    if assign is not None:
+        assign_to(ctx, did, assign)
+
+
+def assign_to(ctx: Ctx, did: str, uid: str | None) -> None:
+    """Only the assigned user may claim `did`: the did is public (BLE name), so this is the proof of
+    possession until the contract has a claim code."""
+    if uid is not None and not ctx.db.one("SELECT 1 FROM user WHERE uid = ?", (uid,)):
+        raise ValueError(f"no user {uid}")
+    ctx.db.x("UPDATE device SET assigned_uid = ? WHERE did = ?", (uid, did))
 
 
 def sync_broker(ctx: Ctx) -> None:
@@ -98,6 +110,9 @@ def push_config(ctx: Ctx, did: str, cfg: dict) -> dict:
     if row is None:
         raise KeyError(did)
     cfg = {**cfg, "cv": 1, "n": row["cfg_n"] + 1, "did": did}
+    if isinstance(cfg.get("net"), dict):
+        # Never sign WiFi PSKs: the envelope goes to the owner's phone. WiFi is provisioned over BLE only.
+        cfg["net"] = {**cfg["net"], "wifi": []}
     raw = signing.config_bytes(models.parse_config(signing.config_bytes(cfg)))
     env = signing.cfg_envelope(ctx.key, raw, ctx.new_id(), int(ctx.clock()))
     ctx.db.x("UPDATE device SET cfg_n = ?, cfg = ?, cfg_env = ? WHERE did = ?",
@@ -108,12 +123,32 @@ def push_config(ctx: Ctx, did: str, cfg: dict) -> dict:
 
 
 def unclaim(ctx: Ctx, did: str, release: bool) -> None:
-    """Delete the beacon's broker credential; `release` (admin) also frees it for a different user."""
-    ctx.db.x("UPDATE device SET claimed = 0, mqtt_hash = NULL, status = '{}', "
-             "owner = CASE WHEN ? THEN NULL ELSE owner END WHERE did = ?", (release, did))
+    """Delete the beacon's broker credential. `release` (admin) also frees it for another user and drops the
+    owner's settings (cfg_n stays, so `n` only ever grows)."""
+    ctx.db.x("UPDATE device SET claimed = 0, mqtt_hash = NULL, status = '{}' WHERE did = ?", (did,))
+    if release:
+        ctx.db.x("UPDATE device SET owner = NULL, cfg = NULL, cfg_env = NULL WHERE did = ?", (did,))
     sync_broker(ctx)
     ctx.publish([Pub(f"hb/v1/d/{did}/cfg", b"", retain=True), Pub(f"hb/v1/d/{did}/state", b"", retain=True)])
     ctx.refresh()
+
+
+class RateLimit:
+    """Sliding window per key. ponytail: in memory, per process, never pruned; fine for a handful of users."""
+
+    def __init__(self, n: int, window: float, clock):
+        self.n, self.window, self.clock = n, window, clock
+        self.hits: dict[tuple, list[float]] = {}
+        self.lock = threading.Lock()
+
+    def hit(self, *keys: tuple) -> None:
+        now = self.clock()
+        with self.lock:
+            recent = {k: [t for t in self.hits.get(k, []) if now - t < self.window] for k in keys}
+            if any(len(v) >= self.n for v in recent.values()):
+                raise HTTPException(429, "slow_down")
+            for k, v in recent.items():
+                self.hits[k] = v + [now]
 
 
 def _token_hash(tok: str) -> str:
@@ -134,6 +169,7 @@ class ClaimIn(BaseModel):
 def create_app(ctx: Ctx) -> FastAPI:
     app = FastAPI(title="Heart Beacon", docs_url=None, redoc_url=None, openapi_url=None)
     db = ctx.db
+    limit = RateLimit(*RATE, ctx.clock)
 
     def me(authorization: str = Header("")):
         tok = authorization.removeprefix("Bearer ").strip()
@@ -149,8 +185,8 @@ def create_app(ctx: Ctx) -> FastAPI:
             raise HTTPException(404, "not_yours")
 
     @app.post("/api/v1/login")
-    def login(body: LoginIn):
-        # ponytail: no lockout, scrypt (~50 ms) is the only brake; add a failure counter if 8443 sees abuse
+    def login(body: LoginIn, request: Request):
+        limit.hit(("login", request.client.host), ("login", body.user))
         row = db.one("SELECT * FROM user WHERE uid = ? AND disabled = 0", (body.user,))
         if row is None or not auth.check_password(body.password, row["pw"]):
             raise HTTPException(401, "bad_login")
@@ -167,17 +203,20 @@ def create_app(ctx: Ctx) -> FastAPI:
         return {"uid": user["uid"], "name": user["name"], "circle": user["circle"], "devices": devs}
 
     @app.post("/api/v1/devices/claim")
-    def claim(body: ClaimIn, user=Depends(me)):
+    def claim(body: ClaimIn, request: Request, user=Depends(me)):
+        limit.hit(("claim", request.client.host), ("claim", user["uid"]))
         if not DID.fullmatch(body.did):
             raise HTTPException(422, "bad_did")
         row = db.one("SELECT * FROM device WHERE did = ?", (body.did,))
-        if row is None:
-            raise HTTPException(404, "not_registered")
+        if row is None or row["assigned_uid"] != user["uid"]:  # unregistered looks the same: no did probing
+            raise HTTPException(403, "not_assigned")
         if row["owner"] not in (None, user["uid"]):
             raise HTTPException(409, "claimed")  # admin must release it first
         pw = auth.new_secret()
-        db.x("UPDATE device SET owner = ?, claimed = 1, mqtt_hash = ? WHERE did = ?",
-             (user["uid"], auth.mosq_hash(pw), body.did))
+        new_owner = row["owner"] != user["uid"]
+        db.x("UPDATE device SET owner = ?, claimed = 1, mqtt_hash = ?, "
+             "cfg = CASE WHEN ? THEN NULL ELSE cfg END, cfg_env = CASE WHEN ? THEN NULL ELSE cfg_env END "
+             "WHERE did = ?", (user["uid"], auth.mosq_hash(pw), new_owner, new_owner, body.did))
         sync_broker(ctx)
         cfg = push_config(ctx, body.did, current_config(ctx, body.did))
         return {"did": body.did, "host": ctx.hosts[0], "mport": ctx.mport, "aport": ctx.aport,

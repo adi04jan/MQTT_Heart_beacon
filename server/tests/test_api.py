@@ -20,8 +20,8 @@ def e(tmp_path):
                   passwd=str(tmp_path / "passwd"), router_hash=auth.mosq_hash("router-pass"),
                   fw_dir=str(tmp_path), publish=pubs.extend, reload=lambda: reloads.append(1), clock=lambda: NOW)
     pw = {u: api.add_user(ctx, u, u.title()) for u in ("alice", "bob")}
-    for did in (A, B):
-        api.register(ctx, did)
+    api.register(ctx, A, assign="alice")
+    api.register(ctx, B, assign="bob")
     return SimpleNamespace(ctx=ctx, c=TestClient(api.create_app(ctx)), pw=pw, pubs=pubs, reloads=reloads,
                            passwd=tmp_path / "passwd")
 
@@ -70,14 +70,18 @@ def test_claim_issues_credential_and_signed_seed_config(e):
     assert json.loads(e.pubs[0].payload) == env and e.reloads
 
 
+def claimer(e):
+    return lambda did, h: e.c.post("/api/v1/devices/claim", json={"did": did}, headers=h)
+
+
 def test_claim_rules(e):
     alice, bob = login(e, "alice"), login(e, "bob")
-    claim = lambda did, h: e.c.post("/api/v1/devices/claim", json={"did": did}, headers=h)  # noqa: E731
-    assert claim("HB-123456", alice).status_code == 404  # not registered
+    claim = claimer(e)
+    assert claim("HB-123456", alice).json()["detail"] == "not_assigned"  # unregistered looks the same: 403
     assert claim("HB-12345", alice).status_code == 422
     assert claim("hb-aaaaaa", alice).status_code == 422
+    assert claim(A, bob).status_code == 403  # the did is public (BLE name): only its assignee may claim
     first = claim(A, alice).json()
-    assert claim(A, bob).status_code == 409  # someone else's
     again = claim(A, alice).json()  # same owner may re-claim (after a factory reset): new password, n bumps
     assert again["pass"] != first["pass"] and not auth.mosq_check(first["pass"], passwd(e)[A])
     assert again["cfg"]["n"] == 2
@@ -85,9 +89,46 @@ def test_claim_rules(e):
     assert e.c.delete(f"/api/v1/devices/{A}/claim", headers=alice).status_code == 200
     assert A not in passwd(e)  # credential deleted
     assert (f"hb/v1/d/{A}/cfg", b"", True) in [(p.topic, p.payload, p.retain) for p in e.pubs]
+    api.assign_to(e.ctx, A, "bob")
     assert claim(A, bob).status_code == 409  # still alice's until the admin releases it
     api.unclaim(e.ctx, A, release=True)
     assert claim(A, bob).status_code == 200
+
+
+def test_release_and_reclaim_by_another_user_starts_from_the_seed(e):
+    alice, claim = login(e, "alice"), claimer(e)
+    claim(A, alice)
+    e.c.patch(f"/api/v1/devices/{A}/settings", headers=alice, json={"name": "Alice desk", "sched": {"stop": "17:00"}})
+    api.unclaim(e.ctx, A, release=True)
+    row = e.ctx.db.one("SELECT cfg, cfg_env, cfg_n FROM device WHERE did = ?", (A,))
+    assert (row["cfg"], row["cfg_env"], row["cfg_n"]) == (None, None, 2)
+    api.assign_to(e.ctx, A, "bob")
+    bob = login(e, "bob")
+    cfg = models.parse_config(signing.unb64u(claim(A, bob).json()["cfg"]["b"]))
+    assert (cfg["n"], cfg["name"], cfg["sched"]["stop"]) == (3, "", "19:00")  # n keeps growing, settings reset
+    assert e.c.get(f"/api/v1/devices/{A}/settings", headers=bob).json()["name"] == ""
+
+
+def test_rate_limit_on_login_and_claim(e):
+    for _ in range(api.RATE[0]):
+        assert e.c.post("/api/v1/login", json={"user": "alice", "pass": "guess"}).status_code == 401
+    assert e.c.post("/api/v1/login", json={"user": "alice", "pass": e.pw["alice"]}).status_code == 429
+    assert e.c.post("/api/v1/login", json={"user": "bob", "pass": e.pw["bob"]}).status_code == 429  # same IP
+    fresh = api.create_app(e.ctx)  # new limiter, same DB
+    from fastapi.testclient import TestClient
+    c = TestClient(fresh)
+    tok = c.post("/api/v1/login", json={"user": "bob", "pass": e.pw["bob"]}).json()["token"]
+    h = {"Authorization": "Bearer " + tok}
+    codes = [c.post("/api/v1/devices/claim", json={"did": A}, headers=h).status_code for _ in range(api.RATE[0] + 1)]
+    assert codes == [403] * api.RATE[0] + [429]
+
+
+def test_wifi_psks_never_enter_a_signed_config(e):
+    claimer(e)(A, login(e, "alice"))
+    cfg = api.current_config(e.ctx, A)
+    cfg["net"]["wifi"] = [{"ssid": "Office", "psk": "secret-psk-123"}]
+    env = api.push_config(e.ctx, A, cfg)
+    assert b"secret" not in signing.unb64u(env["b"]) and models.parse_config(signing.unb64u(env["b"]))["net"]["wifi"] == []
 
 
 def test_settings_user_keys_only_and_signed_publish(e):
