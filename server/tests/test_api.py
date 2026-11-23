@@ -46,7 +46,6 @@ def test_login_returns_mqtt_credentials_in_the_broker_file(e):
     assert e.c.post("/api/v1/login", json={"user": "alice", "pass": "nope"}).status_code == 401
     assert e.c.post("/api/v1/login", json={"user": "zed", "pass": "nope"}).status_code == 401
     e.ctx.db.x("UPDATE user SET disabled = 1 WHERE uid = 'alice'")
-    e.now[0] += 2  # past alice's per-address backoff
     assert e.c.post("/api/v1/login", json={"user": "alice", "pass": e.pw["alice"]}).status_code == 401
 
 
@@ -116,6 +115,15 @@ def bad(c, user="alice"):
     return c.post("/api/v1/login", json={"user": user, "pass": "guess-guess-guess"})
 
 
+def test_unknown_user_and_wrong_password_look_identical(e, monkeypatch):
+    seen, real = [], auth.check_password
+    monkeypatch.setattr(auth, "check_password", lambda pw, stored: seen.append(stored) or real(pw, stored))
+    wrong, unknown = bad(e.c, "alice"), bad(e.c, "nobody")
+    assert (wrong.status_code, wrong.content) == (unknown.status_code, unknown.content) == (401, b'{"detail":"bad_login"}')
+    assert {k: v for k, v in wrong.headers.items() if k != "date"} ==            {k: v for k, v in unknown.headers.items() if k != "date"}
+    assert seen[1] == auth.DUMMY_HASH and seen[0] != auth.DUMMY_HASH  # the hash runs for a missing user too
+
+
 def test_parallel_bad_logins_from_one_ip_are_capped_before_the_password_check(e, monkeypatch):
     checks, real = [], auth.check_password
 
@@ -126,32 +134,26 @@ def test_parallel_bad_logins_from_one_ip_are_capped_before_the_password_check(e,
 
     monkeypatch.setattr(auth, "check_password", slow_check)
     with ThreadPoolExecutor(50) as pool:
-        codes = list(pool.map(lambda i: bad(e.c, f"u{i}").status_code if i % 2 else bad(e.c).status_code, range(50)))
+        codes = list(pool.map(lambda i: bad(e.c, f"u{i}").status_code, range(50)))
     assert len(checks) <= auth.IP_FAILS and codes.count(429) >= 50 - auth.IP_FAILS
     assert set(codes) <= {401, 429}
 
 
 def test_blocked_ip_does_not_block_the_user_elsewhere_and_says_when(e):
     x, y = TestClient(e.c.app, client=("192.0.2.1", 1000)), TestClient(e.c.app, client=("192.0.2.2", 1000))
-    for i in range(auth.IP_FAILS):
-        assert bad(x, f"user{i}").status_code == 401
+    for _ in range(auth.IP_FAILS):
+        assert bad(x).status_code == 401
     blocked = x.post("/api/v1/login", json={"user": "alice", "pass": e.pw["alice"]})
     assert blocked.status_code == 429 and int(blocked.headers["Retry-After"]) == auth.WINDOW_S
     assert y.post("/api/v1/login", json={"user": "alice", "pass": e.pw["alice"]}).status_code == 200
 
 
-def test_ip_user_backoff_doubles_and_a_success_resets_it(e):
-    assert bad(e.c).status_code == 401
-    again = bad(e.c)
-    assert again.status_code == 429 and again.headers["Retry-After"] == "1"
-    assert bad(e.c, "bob").status_code == 401  # other names from this address are not held back
-    e.now[0] += 1
-    assert bad(e.c).status_code == 401
-    assert bad(e.c).headers["Retry-After"] == "2"
-    e.now[0] += 2
-    login(e, "alice")  # success: backoff cleared, its reservation released
-    assert bad(e.c).status_code == 401 and bad(e.c).headers["Retry-After"] == "1"
-    assert e.ctx.guard.failed_logins("alice") == 3 and len(e.ctx.guard.ips["testclient"]) == 4
+def test_a_successful_login_frees_its_entry(e):
+    for _ in range(3):
+        bad(e.c)
+    assert len(e.ctx.guard.ips["testclient"]) == 3
+    login(e, "alice")
+    assert "testclient" not in e.ctx.guard.ips
 
 
 def test_login_never_sleeps(e, monkeypatch):
@@ -170,51 +172,43 @@ def test_claim_attempts_are_limited_per_user(e):
     assert e.c.post("/api/v1/devices/claim", json={"did": A}, headers=login(e, "alice")).status_code == 200
 
 
-def blocked(g, ip, user="alice"):
+def blocked(g, ip):
     try:
-        g.login_start(ip, user)
+        g.login_start(ip)  # no login_ok: the attempt stays as a failure
     except auth.TooMany:
         return True
-    g.login_failed(ip, user, known=False)
     return False
 
 
-def test_spraying_random_usernames_keeps_the_address_blocked():
-    g = auth.Guard(lambda: 0.0, max_keys=5)
-    results = [blocked(g, "198.51.100.9", f"rnd{i}") for i in range(10_000)]
-    assert results == [False] * auth.IP_FAILS + [True] * (10_000 - auth.IP_FAILS)
-    assert list(g.ips) == ["198.51.100.9"] and not g.pairs and not g.users  # unknown names are never stored
+def test_ten_thousand_sprayed_addresses_never_evict_a_blocked_one():
+    g = auth.Guard(lambda: 0.0, max_keys=100)
+    for _ in range(auth.IP_FAILS):
+        blocked(g, "198.51.100.9")
+    assert blocked(g, "198.51.100.9")
+    assert not any(blocked(g, f"10.{i >> 8 & 255}.{i & 255}.1") for i in range(10_000))  # evicts the sprayers
+    assert len(g.ips) == 100 and blocked(g, "198.51.100.9")
 
 
-def test_a_full_table_refuses_newcomers_instead_of_evicting_live_blocks():
+def test_only_a_table_full_of_blocked_addresses_refuses_newcomers():
     now = [0.0]
     g = auth.Guard(lambda: now[0], max_keys=3)
-    for _ in range(auth.IP_FAILS):
-        blocked(g, "192.0.2.1")
-    blocked(g, "192.0.2.2")
-    blocked(g, "192.0.2.3")
+    for ip in ("192.0.2.1", "192.0.2.2", "192.0.2.3"):
+        for _ in range(auth.IP_FAILS):
+            blocked(g, ip)
     with pytest.raises(auth.TooMany) as full:
-        g.login_start("192.0.2.4", "alice")  # table full of live entries: fail closed
+        g.login_start("192.0.2.4")
     assert full.value.retry_after == auth.WINDOW_S
-    assert blocked(g, "192.0.2.1")  # the live block survives
-    assert not blocked(g, "192.0.2.2")  # known addresses keep working
     now[0] += auth.WINDOW_S
-    assert not blocked(g, "192.0.2.4")  # expired entries make room
+    assert not blocked(g, "192.0.2.4")  # the window passed: room again
 
 
 def test_ipv6_addresses_in_one_64_share_a_counter():
     g = auth.Guard(lambda: 0.0)
     for i in range(auth.IP_FAILS):
-        assert not blocked(g, f"2001:db8:1:2::{i + 1:x}", f"u{i}")
+        assert not blocked(g, f"2001:db8:1:2::{i + 1:x}")
     assert blocked(g, "2001:db8:1:2:ffff:ffff:ffff:ffff")
     assert not blocked(g, "2001:db8:1:3::1")
     assert auth.bucket("::ffff:192.0.2.7") == "192.0.2.7" and auth.bucket("testclient") == "testclient"
-
-
-def test_failed_logins_for_real_users_are_counted_for_the_admin(e):
-    bad(e.c, "alice")
-    bad(e.c, "nobody")
-    assert e.ctx.guard.failed_logins("alice") == 1 and "nobody" not in e.ctx.guard.users
 
 
 def test_generated_passwords_are_long(e):

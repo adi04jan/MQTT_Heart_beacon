@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import re
 import secrets
 import time
@@ -21,6 +22,7 @@ from .db import Db
 from .router import Pub
 
 SESSION_S = 365 * 24 * 3600
+log = logging.getLogger("hb.api")
 CLAIMS = 10  # claim attempts per user per auth.WINDOW_S, then 429 (login limits live in auth.Guard)
 UID = re.compile(r"[a-z][a-z0-9_]{0,31}")  # never collides with a did (HB-XXXXXX) in the ACL's %u patterns
 DID = re.compile(r"HB-[0-9A-F]{6}")
@@ -182,12 +184,13 @@ def create_app(ctx: Ctx) -> FastAPI:
     def login(body: LoginIn, request: Request):
         ip = request.client.host
         with _limited():
-            token = ctx.guard.login_start(ip, body.user)
+            ctx.guard.login_start(ip)
         row = db.one("SELECT * FROM user WHERE uid = ? AND disabled = 0", (body.user,))
-        if row is None or not auth.check_password(body.password, row["pw"]):
-            ctx.guard.login_failed(ip, body.user, known=row is not None)
+        # Unknown user and wrong password look the same: same answer, and a hash check either way.
+        if not auth.check_password(body.password, row["pw"] if row else auth.DUMMY_HASH) or row is None:
+            log.warning("failed login for %r from %s", body.user, ip)
             raise HTTPException(401, "bad_login")
-        ctx.guard.login_ok(ip, body.user, token)
+        ctx.guard.login_ok(ip)
         tok = auth.new_secret()
         db.x("INSERT INTO session VALUES (?, ?, ?)", (_token_hash(tok), row["uid"], int(ctx.clock())))
         return {"token": tok, "uid": row["uid"], "name": row["name"],

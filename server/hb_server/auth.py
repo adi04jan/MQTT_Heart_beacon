@@ -71,13 +71,15 @@ def write_passwd(path: str | Path, entries: list[tuple[str, str]]) -> None:
 
 
 # ---- attempt limits ----------------------------------------------------------------
+# Threat model: a home server with 2 admin-created users holding generated 20-character passwords. Guessing is
+# hopeless, so this limits resource abuse (one scrypt per attempt) per client address, not password guessing.
 
 WINDOW_S = 600
-IP_FAILS = 10  # failed logins per client address per window (attempts in flight count), then refused
-PAIR_MAX_S = 60  # per (address, user) not-before after a failure: 1, 2, 4 ... 60 s
-MAX_KEYS = 10_000  # live entries per table; a full table refuses newcomers instead of forgetting anyone
+IP_FAILS = 10  # failed logins per address per window (attempts in flight count), then 429
+MAX_KEYS = 10_000
 
 log = logging.getLogger("hb.auth")
+DUMMY_HASH = hash_password(secrets.token_urlsafe(16))  # checked when the user does not exist: same timing
 
 
 class TooMany(Exception):
@@ -87,7 +89,7 @@ class TooMany(Exception):
 
 
 def bucket(ip: str) -> str:
-    """The unit an address limit applies to: IPv4 as is, IPv6 per /64 (one subscriber owns the whole /64)."""
+    """The unit the limit applies to: IPv4 as is, IPv6 per /64 (one subscriber owns the whole /64)."""
     try:
         a = ipaddress.ip_address(ip)
     except ValueError:
@@ -100,37 +102,29 @@ def bucket(ip: str) -> str:
 
 
 class Guard:
-    """Login and claim attempt limits. Never sleeps; every check-and-record happens under one lock.
+    """Per-address login limit and per-user claim limit. Never sleeps; every check-and-record is under one lock.
 
-    Login: an attempt is reserved against its address bucket before the password check and released on success,
-    so parallel guesses count while in flight. Per address: at most IP_FAILS per window. Per (address, user):
-    a doubling not-before. Per user alone: counted for the admin page, never blocking, so nobody can lock a
-    user out from another address. Usernames that do not exist are never stored, so spraying them grows nothing.
-    Tables only shed expired entries; a table full of live ones refuses new keys (fail closed).
+    A login attempt is reserved against its address before the password check, so parallel guesses count while
+    in flight; a success deletes the address's entry. Full table: evict the unblocked entry with the fewest
+    failures (oldest first). A blocked address is never evicted; only when every entry is blocked do new
+    addresses get 429.
     """
 
     def __init__(self, clock=time.time, max_keys: int = MAX_KEYS):
         self.clock, self.max_keys = clock, max_keys
         self.lock = threading.Lock()
-        self.ips: dict[str, list[float]] = {}  # address bucket -> attempts (reserved or failed)
-        self.pairs: dict[tuple[str, str], tuple[int, float]] = {}  # (bucket, real user) -> (failures, not before)
-        self.users: dict[str, list[float]] = {}  # real user -> failures, for the admin page
-        self.claims: dict[str, list[float]] = {}  # authenticated user -> claim attempts
+        self.ips: dict[str, list[float]] = {}  # address bucket -> attempts (in flight or failed)
+        self.claims: dict[str, list[float]] = {}  # authenticated user -> claim attempts (bounded by users)
 
     def _prune(self, now: float) -> None:
-        # ponytail: O(live keys) per attempt, at most max_keys per table
-        for table in (self.ips, self.users, self.claims):
+        # ponytail: O(entries) per attempt, entries capped at max_keys
+        for table in (self.ips, self.claims):
             for k in list(table):
                 v = [t for t in table[k] if now - t < WINDOW_S]
                 if v:
                     table[k] = v
                 else:
                     del table[k]
-        for k in [k for k, (_, nb) in self.pairs.items() if now - nb >= WINDOW_S]:
-            del self.pairs[k]
-
-    def _room(self, table: dict, key) -> bool:
-        return key in table or len(table) < self.max_keys
 
     def take_claim(self, uid: str, cap: int) -> None:
         with self.lock:
@@ -139,52 +133,28 @@ class Guard:
             hits = self.claims.get(uid, [])
             if len(hits) >= cap:
                 raise TooMany(hits[0] + WINDOW_S - now)
-            if not self._room(self.claims, uid):
-                raise TooMany(WINDOW_S)
             self.claims[uid] = hits + [now]
 
-    def login_start(self, ip: str, user: str) -> float:
-        """Reserve a login attempt; returns the token for login_ok."""
+    def login_start(self, ip: str) -> None:
+        """Reserve a login attempt for `ip`; it stays as a failure unless login_ok follows."""
         b = bucket(ip)
         with self.lock:
             now = self.clock()
             self._prune(now)
-            nb = self.pairs.get((b, user), (0, 0.0))[1]
-            if now < nb:
-                raise TooMany(nb - now)
             hits = self.ips.get(b, [])
             if len(hits) >= IP_FAILS:
                 raise TooMany(hits[0] + WINDOW_S - now)
-            if not self._room(self.ips, b):
-                log.warning("login table full (%d live addresses): refusing %s", len(self.ips), b)
-                raise TooMany(WINDOW_S)
+            if b not in self.ips and len(self.ips) >= self.max_keys:
+                free = [k for k, v in self.ips.items() if len(v) < IP_FAILS]
+                if not free:
+                    log.warning("login table full of blocked addresses: refusing %s", b)
+                    raise TooMany(min(v[0] for v in self.ips.values()) + WINDOW_S - now)
+                del self.ips[min(free, key=lambda k: (len(self.ips[k]), self.ips[k][0]))]
             self.ips[b] = hits + [now]
-            return now
 
-    def login_ok(self, ip: str, user: str, token: float) -> None:
-        b = bucket(ip)
+    def login_ok(self, ip: str) -> None:
         with self.lock:
-            hits = self.ips.get(b, [])
-            if token in hits:
-                hits.remove(token)
-            self.pairs.pop((b, user), None)
-
-    def login_failed(self, ip: str, user: str, known: bool) -> None:
-        """The reservation stays as a failure. `known`: the username exists."""
-        b, n = bucket(ip), 0
-        with self.lock:
-            now = self.clock()
-            if known:
-                n = self.pairs.get((b, user), (0, 0.0))[0] + 1
-                if self._room(self.pairs, (b, user)):  # full: the address cap still holds
-                    self.pairs[(b, user)] = (n, now + min(2.0 ** (n - 1), PAIR_MAX_S))
-                self.users[user] = self.users.get(user, []) + [now]
-        log.warning("failed login for %r from %s%s", user, b, f" ({n} in a row)" if known else " (no such user)")
-
-    def failed_logins(self, user: str) -> int:
-        with self.lock:
-            now = self.clock()
-            return sum(1 for t in self.users.get(user, []) if now - t < WINDOW_S)
+            self.ips.pop(bucket(ip), None)
 
 
 def reload_broker(unit: str = "hb-mosquitto.service") -> None:
