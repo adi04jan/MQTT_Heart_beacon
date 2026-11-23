@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS event (
 CREATE TABLE IF NOT EXISTS delivery (
   src TEXT NOT NULL, eid TEXT NOT NULL, did TEXT NOT NULL, k TEXT NOT NULL, created INTEGER NOT NULL,
   status TEXT NOT NULL, path TEXT, sent_at INTEGER NOT NULL, tried_at INTEGER NOT NULL,
-  tries INTEGER NOT NULL, show_id TEXT, PRIMARY KEY (src, eid, did));
+  tries INTEGER NOT NULL, show_id TEXT, owner TEXT NOT NULL, PRIMARY KEY (src, eid, did));
 CREATE INDEX IF NOT EXISTS event_ts ON event (ts);
 """
 

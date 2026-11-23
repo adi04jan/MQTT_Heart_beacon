@@ -35,7 +35,7 @@ def _load_object(raw: bytes):
     """Strict RFC 8259 object or None."""
     try:
         obj = json.loads(raw.decode("utf-8"), parse_constant=_reject_constant)
-    except ValueError:  # includes JSONDecodeError and UnicodeDecodeError
+    except (ValueError, RecursionError):  # JSONDecodeError, UnicodeDecodeError; deep nesting on Python 3.11
         return None
     return obj if isinstance(obj, dict) else None
 

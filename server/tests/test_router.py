@@ -5,7 +5,7 @@ import json
 
 from hb_server import models
 from hb_server.db import Db
-from hb_server.router import Beacon, Msg, State, Tick, User, load_state, route, save_state
+from hb_server.router import Beacon, Directory, Msg, State, Tick, User, load_state, route, save_state
 
 A, B, C = "HB-AAAAAA", "HB-BBBBBB", "HB-CCCCCC"
 
@@ -192,6 +192,69 @@ def test_unknown_type_gets_resp_on_the_same_path():
         {"v": 1, "t": "resp", "id": f"{1:016x}", "ts": 1000, "re": "7" * 16, "ok": False, "err": "unknown_t"}]
     pubs = send(st, f"hb/v1/d/{B}/up", env("dance", "8" * 16))
     assert only(pubs, f"hb/v1/d/{B}/down")[0]["re"] == "8" * 16
+
+
+def test_malformed_payloads_are_dropped_and_routing_continues():
+    st = mkstate()
+    up(st, B)
+    hostile = [
+        ("hb/v1/u/alice/up", env("mood", "1" * 16, k=["heart"])),
+        ("hb/v1/u/alice/up", env("mood", "2" * 16, k={"heart": 1})),
+        (f"hb/v1/d/{A}/up", env("mood", "3" * 16, k=["heart"])),
+        ("hb/v1/u/bob/up", env("link", "4" * 16, did=[B], ble=True)),
+        ("hb/v1/u/bob/up", env("relay", "5" * 16, did={"x": B}, m={})),
+        ("hb/v1/u/bob/up", env("relay", "6" * 16, did=B, m=[1, 2])),
+        (f"hb/v1/d/{B}/state", env("state", "7" * 16, st=["near"], path=["ble"], wake="soon")),
+        (f"hb/v1/d/{B}/up", env("tele", "8" * 16, mv=[[[1]]], fw="2.0.0")),
+        ("hb/v1/u/bob/state", b"[" * 1024),
+        ("hb/v1/u/bob/state", b'{"on":' + b"[" * 900 + b"]" * 900 + b"}"),
+        ("hb/v1/u/bob/state", b'{"on":false,"pad":"' + b"x" * 2000 + b'"}'),  # oversize
+        ("hb/v1/u/bob/state", b"[false]"),
+        ("hb/v1/u/alice/up", b'{"v":1,"t":"mood","id":"' + b"9" * 16 + b'","ts":0,"k":' + b"[" * 980 + b"}"),
+        ("hb/v1/u/alice/up", b"x" * 5000),
+    ]
+    for topic, raw in hostile:
+        assert all(t != f"hb/v1/u/alice/down" or p["t"] != "rcpt" for t, p, _ in send(st, topic, raw)), topic
+    assert st.events == {} and st.beacons[B].wifi and st.beacons[B].tele == {"fw": "2.0.0"}
+    pubs = send(st, "hb/v1/u/alice/up", env("mood", EID, k="heart"), now=1001)  # still routing
+    assert only(pubs, f"hb/v1/d/{B}/down")[0]["id"] == EID
+
+
+def test_glue_logs_and_drops_a_crashing_message(tmp_path, monkeypatch, caplog):
+    from hb_server import router
+    db = Db(str(tmp_path / "hb.db"))
+    g = router.Glue(db, "127.0.0.1", 1, "pw", clock=lambda: 1000)
+    monkeypatch.setattr(router, "route", lambda ev, st: 1 / 0)
+    assert g.handle(Msg("hb/v1/u/alice/up", b"{}", 1000)) == []
+    assert "router dropped hb/v1/u/alice/up" in caplog.text
+    monkeypatch.undo()
+    assert g.handle(Tick(1001)) == []  # the glue still works afterwards
+
+
+def test_reclaim_by_another_user_expires_the_old_owners_queue():
+    st = mkstate()
+    st.users["dave"] = User("dave", "Dave", "other")
+    up(st, B, "ble", now=1000)  # bob's phone carries B
+    send(st, "hb/v1/u/alice/up", env("mood", EID, k="heart"), now=1000)  # in flight to bob over BLE
+    send(st, f"hb/v1/d/{B}/state", env("state", "9" * 16, st="SLEEP", path="wifi"), now=1001)
+    send(st, "hb/v1/u/alice/up", env("mood", "00000000000000bb", k="sorry"), now=1002)  # queued
+    users = list(st.users.values())
+    moved = route(Directory(users, [(A, "alice", 330), (B, "dave", 0), (C, "carol", 0)], 1003), st)  # B -> dave
+    got = [(p.topic, json.loads(p.payload)) for p in moved]
+    assert sorted((t, p["id"], p["st"]) for t, p in got) == [
+        ("hb/v1/u/alice/down", EID, "expired"), ("hb/v1/u/alice/down", "00000000000000bb", "expired")]
+    later = tick(st, 1020) + up(st, B, "wifi", now=1030) + send(st, f"hb/v1/d/{B}/up", env("shown", EID), now=1031)
+    later += tick(st, 1060)
+    assert [t for t, *_ in later if not t.endswith(f"{B}/down")] == []  # nothing to bob, no rcpt at all
+    assert [p["t"] for t, p, *_ in later if t.endswith(f"{B}/down")] == ["time"]  # no old show reaches dave's B
+
+
+def test_reclaim_by_the_same_owner_keeps_the_queue():
+    st = mkstate()
+    send(st, "hb/v1/u/alice/up", env("mood", EID, k="heart"), now=1000)
+    devs = [(A, "alice", 330), (B, "bob", 330), (C, "carol", 0)]
+    assert route(Directory(list(st.users.values()), devs, 1001), st) == []
+    assert only(up(st, B, now=1002), f"hb/v1/d/{B}/down")[0]["t"] == "show"
 
 
 def test_queue_survives_restart(tmp_path):

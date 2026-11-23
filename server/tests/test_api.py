@@ -121,7 +121,7 @@ def test_me_and_events(e):
     assert me["uid"] == "alice" and [d["did"] for d in me["devices"]] == [A]
     db = e.ctx.db
     db.x("INSERT INTO event VALUES (?, ?, ?, ?, ?)", (A, "00000000000000aa", "alice", "heart", NOW - 5))
-    db.x("INSERT INTO delivery VALUES (?, ?, ?, ?, ?, 'shown', 'wifi', 0, 0, 1, ?)",
+    db.x("INSERT INTO delivery VALUES (?, ?, ?, ?, ?, 'shown', 'wifi', 0, 0, 1, ?, 'bob')",
          (A, "00000000000000aa", B, "heart", NOW - 5, "00000000000000aa"))
     ev = e.c.get("/api/v1/events", headers=login(e, "bob")).json()
     assert ev == [{"id": "00000000000000aa", "k": "heart", "ts": NOW - 5, "uid": "alice", "from": "Alice", "src": A,

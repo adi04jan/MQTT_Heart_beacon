@@ -9,11 +9,16 @@ on its most recently reported live path (wifi: `d/{did}/down`; ble: `relay` to t
 in 10 s: send once on the other path; still nothing after another 10 s: the beacon counts as unreachable and the
 delivery waits for it to show up again. Undelivered after 24 h: expired. The sender's phone gets `rcpt`
 queued / shown / expired per target beacon. Same `k` to the same beacon is played once per burst: joins a show
-still in flight or started < 3 s ago, and a flush on wake plays each `k` once.
+still in flight or started < 3 s ago, and a flush on wake plays each `k` once. A delivery is bound to the
+beacon's owner when it was made: if the beacon changes owner, is unclaimed, or owner and sender stop sharing a
+circle, it expires instead of reaching the new owner.
+
+Every field read from a payload is type-checked before it is used as a key: untrusted input never raises.
 """
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 import threading
 import time
@@ -22,7 +27,9 @@ from typing import Callable
 
 from . import models
 
+log = logging.getLogger("hb.router")
 KINDS = frozenset({"heart", "sorry", "annoy"})
+TELE_KEYS = frozenset({"mv", "pct", "rssi", "fw", "hw", "cfg", "up_s", "rst", "heap"})
 RETRY_S = 10
 EXPIRE_S = 24 * 3600
 BURST_S = 3
@@ -79,6 +86,7 @@ class Delivery:
     tried_at: int = 0  # last send
     tries: int = 0
     show_id: str | None = None
+    owner: str = ""  # the target beacon's owner when this was made
     dirty: bool = True
 
 
@@ -111,10 +119,21 @@ class Tick:
     now: int
 
 
-def route(ev: Msg | Tick, st: State) -> list[Pub]:
+@dataclass(frozen=True)
+class Directory:
+    """Users and claimed beacons changed (API / admin): `devs` is [(did, owner, tz)]."""
+    users: list[User]
+    devs: list[tuple[str, str, int]]
+    now: int
+
+
+def route(ev: Msg | Tick | Directory, st: State) -> list[Pub]:
     out: list[Pub] = []
     if isinstance(ev, Tick):
         _tick(st, ev.now, out)
+        return out
+    if isinstance(ev, Directory):
+        _directory(st, ev.users, ev.devs, ev.now, out)
         return out
     parts = ev.topic.split("/")
     if len(parts) != 5 or parts[:2] != ["hb", "v1"] or parts[2] not in ("d", "u") or parts[4] not in ("up", "state"):
@@ -134,6 +153,11 @@ def route(ev: Msg | Tick, st: State) -> list[Pub]:
     return out
 
 
+def _str(body: dict, key: str) -> str | None:
+    v = body.get(key)
+    return v if isinstance(v, str) else None
+
+
 # ---- uplinks ----------------------------------------------------------------------
 
 def _from_beacon(st, did, env, path, now, out):
@@ -146,19 +170,19 @@ def _from_beacon(st, did, env, path, now, out):
         return
     _links(st, b, now, out, **{path: True}, path=path)  # hearing from it proves the path
     if env.t == "mood":
-        if env.body.get("k") in KINDS:
+        if _str(env.body, "k") in KINDS:
             _new_event(st, did, b.owner, env.id, env.body["k"], now, out)
     elif env.t == "shown":
         _shown(st, did, env.id, now, out)
     elif env.t == "tele":
-        b.tele = env.body
+        b.tele = {k: v for k, v in env.body.items() if k in TELE_KEYS and type(v) in (int, float, str)}
     elif env.t not in models.TYPES:
         _send(st, b, path, models.unknown_t_response(env, st.new_id(), now), now, out)
 
 
 def _beacon_state(st, b, body, path, now, out):
-    s = str(body.get("st", "")).lower()
-    p = body.get("path") if body.get("path") in ("wifi", "ble") else path
+    s = (_str(body, "st") or "").lower()
+    p = _str(body, "path") if _str(body, "path") in ("wifi", "ble") else path
     b.st = s
     if models._is_int(body.get("wake")):
         b.wake = body["wake"]
@@ -177,11 +201,11 @@ def _from_phone(st, uid, env, now, out):
         return
     body = env.body
     if env.t == "mood":
-        if body.get("k") in KINDS:
+        if _str(body, "k") in KINDS:
             _new_event(st, uid, uid, env.id, body["k"], now, out)
         return
     if env.t in ("relay", "link"):
-        b = st.beacons.get(body.get("did"))
+        b = st.beacons.get(_str(body, "did") or "")
         if b is None or b.owner != uid:  # a phone speaks only for its owner's beacons
             return
         if env.t == "link":
@@ -203,11 +227,8 @@ def _from_phone(st, uid, env, now, out):
 
 def _phone_state(st, uid, payload, now, out):
     """`u/{uid}/state` is `{"on":bool}` (LWT false). A phone without its server link is no BLE path."""
-    try:
-        on = json.loads(payload).get("on")
-    except (ValueError, AttributeError):
-        return
-    if on is False:
+    obj = models._load_object(payload) if len(payload) <= models.MAX_MSG else None
+    if obj is not None and obj.get("on") is False:
         for b in st.beacons.values():
             if b.owner == uid and b.ble:
                 _links(st, b, now, out, ble=False)
@@ -241,7 +262,7 @@ def _new_event(st, src, uid, eid, k, now, out):
         out.append(Pub(f"hb/v1/u/{o}/down", models.encode("mood", eid, now, {"k": k, "from": sender.name})))
     for b in sorted(st.beacons.values(), key=lambda b: b.did):
         if b.owner in others:
-            d = Delivery(src, eid, b.did, k, now)
+            d = Delivery(src, eid, b.did, k, now, owner=b.owner)
             st.deliveries.append(d)
             _rcpt(st, d, "queued", now, out)
             _deliver(st, b, d, now, out)
@@ -343,14 +364,27 @@ def load_directory(db) -> tuple[list[User], list[tuple[str, str, int]]]:
     return users, devs
 
 
-def set_directory(st: State, users, devs) -> None:
+def _directory(st, users, devs, now, out):
     st.users = {u.uid: u for u in users}
     beacons = {}
     for did, owner, tz in devs:
-        b = st.beacons.get(did) or Beacon(did, owner)
-        b.owner, b.tz = owner, tz
+        b = st.beacons.get(did)
+        if b is None or b.owner != owner:  # new owner: forget the old owner's links too
+            b = Beacon(did, owner, dirty=True)
+        b.tz = tz
         beacons[did] = b
     st.beacons = beacons
+    for d in st.deliveries:
+        if d.status in ("pending", "sent") and not _still_valid(st, d):
+            d.status, d.dirty = "expired", True
+            _rcpt(st, d, "expired", now, out)
+
+
+def _still_valid(st, d) -> bool:
+    """Same owner as when it was made, and owner and sender still share a circle."""
+    b, e = st.beacons.get(d.did), st.events.get((d.src, d.eid))
+    owner, sender = st.users.get(d.owner), e and st.users.get(e.uid)
+    return bool(b and b.owner == d.owner and owner and sender and owner.circle == sender.circle)
 
 
 _STATUS = ("wifi", "ble", "path", "st", "wake", "last_seen", "tele")
@@ -358,18 +392,18 @@ _STATUS = ("wifi", "ble", "path", "st", "wake", "last_seen", "tele")
 
 def load_state(db, now: int) -> State:
     st = State()
-    set_directory(st, *load_directory(db))
+    for r in db.q("SELECT * FROM event WHERE ts > ?", (now - EXPIRE_S,)):
+        st.events[(r["src"], r["id"])] = Event(r["src"], r["id"], r["uid"], r["k"], r["ts"])
+    for r in db.q("SELECT * FROM delivery WHERE created > ? OR status IN ('pending', 'sent')", (now - EXPIRE_S,)):
+        st.deliveries.append(Delivery(r["src"], r["eid"], r["did"], r["k"], r["created"], r["status"], r["path"],
+                                      r["sent_at"], r["tried_at"], r["tries"], r["show_id"], r["owner"], False))
+    _directory(st, *load_directory(db), now, [])  # receipts for anything stale are lost across a restart
     for r in db.q("SELECT did, status FROM device WHERE claimed = 1"):
         b = st.beacons.get(r["did"])
         if b:
             for k, v in json.loads(r["status"]).items():
                 if k in _STATUS:
                     setattr(b, k, v)
-    for r in db.q("SELECT * FROM event WHERE ts > ?", (now - EXPIRE_S,)):
-        st.events[(r["src"], r["id"])] = Event(r["src"], r["id"], r["uid"], r["k"], r["ts"])
-    for r in db.q("SELECT * FROM delivery WHERE created > ? OR status IN ('pending', 'sent')", (now - EXPIRE_S,)):
-        st.deliveries.append(Delivery(r["src"], r["eid"], r["did"], r["k"], r["created"], r["status"], r["path"],
-                                      r["sent_at"], r["tried_at"], r["tries"], r["show_id"], dirty=False))
     return st
 
 
@@ -379,9 +413,9 @@ def save_state(db, st: State) -> None:
             c.execute("INSERT OR IGNORE INTO event VALUES (?, ?, ?, ?, ?)", (e.src, e.eid, e.uid, e.k, e.ts))
         for d in st.deliveries:
             if d.dirty:
-                c.execute("INSERT OR REPLACE INTO delivery VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                c.execute("INSERT OR REPLACE INTO delivery VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                           (d.src, d.eid, d.did, d.k, d.created, d.status, d.path, d.sent_at, d.tried_at, d.tries,
-                           d.show_id))
+                           d.show_id, d.owner))
         for b in st.beacons.values():
             if b.dirty:
                 c.execute("UPDATE device SET status = ? WHERE did = ?",
@@ -425,10 +459,15 @@ class Glue:
         rows = self.db.q("SELECT did, cfg_env FROM device WHERE claimed = 1 AND cfg_env IS NOT NULL")
         self.publish([Pub(f"hb/v1/d/{r['did']}/cfg", r["cfg_env"].encode(), retain=True) for r in rows])
 
-    def handle(self, ev: Msg | Tick) -> list[Pub]:
-        with self.lock:
-            pubs = route(ev, self.state)
-            save_state(self.db, self.state)
+    def handle(self, ev: Msg | Tick | Directory) -> list[Pub]:
+        """Never raises: an exception here would kill paho's network thread or the ticker."""
+        try:
+            with self.lock:
+                pubs = route(ev, self.state)
+                save_state(self.db, self.state)
+        except Exception:
+            log.exception("router dropped %s", getattr(ev, "topic", type(ev).__name__))
+            return []
         self.publish(pubs)
         return pubs
 
@@ -438,5 +477,4 @@ class Glue:
 
     def refresh(self) -> None:
         """Pick up users and claims changed by the API or admin."""
-        with self.lock:
-            set_directory(self.state, *load_directory(self.db))
+        self.handle(Directory(*load_directory(self.db), int(self.clock())))
