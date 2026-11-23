@@ -1,0 +1,16 @@
+# Heart Beacon v2 ACL for hb-mosquitto (Mosquitto 1.6.9): /etc/mosquitto-hb/acl
+# %u is the MQTT username: a beacon logs in as its did (HB-XXXXXX), a phone as its uid ([a-z][a-z0-9_]*).
+# The two never collide, so the d/ patterns are dead for phones and the u/ patterns dead for beacons.
+# Pattern lines apply to every user; "read" covers subscribe and delivery.
+
+pattern write hb/v1/d/%u/up
+pattern write hb/v1/d/%u/state
+pattern read hb/v1/d/%u/down
+pattern read hb/v1/d/%u/cfg
+
+pattern write hb/v1/u/%u/up
+pattern write hb/v1/u/%u/state
+pattern read hb/v1/u/%u/down
+
+user router
+topic readwrite hb/v1/#

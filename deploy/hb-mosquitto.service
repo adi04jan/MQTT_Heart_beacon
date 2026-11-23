@@ -1,0 +1,24 @@
+# /etc/systemd/system/hb-mosquitto.service
+[Unit]
+Description=Heart Beacon v2 MQTT broker (own Mosquitto instance: TLS 8883, loopback 1884)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=hb
+Group=hb
+StateDirectory=hb-mosquitto hb
+StateDirectoryMode=0700
+# hb-server owns the password file; an empty one lets the broker start first.
+ExecStartPre=/bin/sh -c 'test -e /var/lib/hb/passwd || install -m 600 /dev/null /var/lib/hb/passwd'
+ExecStart=/usr/sbin/mosquitto -c /etc/mosquitto-hb/mosquitto-hb.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

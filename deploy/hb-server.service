@@ -1,0 +1,24 @@
+# /etc/systemd/system/hb-server.service
+# Code in /opt/hb (this repo), venv in /opt/hb/server/.venv (Python >= 3.11).
+[Unit]
+Description=Heart Beacon v2 server: router, API (TLS 8443), admin (127.0.0.1:8444)
+After=hb-mosquitto.service
+Wants=hb-mosquitto.service
+
+[Service]
+User=hb
+Group=hb
+EnvironmentFile=/etc/hb/hb-server.env
+WorkingDirectory=/opt/hb/server
+ExecStart=/opt/hb/server/.venv/bin/python -m hb_server serve
+StateDirectory=hb
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
