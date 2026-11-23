@@ -1,7 +1,9 @@
-// Golden vectors (protocol/vectors.json) against hb_msg and hb_frame. Config vectors join in M3 (hb_config).
+// Golden vectors (protocol/vectors.json) against hb_msg, hb_frame and hb_cfg_default. Config parse vectors
+// join in M3 (hb_config).
 #include "unity.h"
 #include "hb_msg.h"
 #include "hb_frame.h"
+#include "hb_cfg.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -216,6 +218,35 @@ static void test_reassemble_steps(void)
     }
 }
 
+static int hhmm(const char *s)
+{
+    return ((s[0] - '0') * 10 + (s[1] - '0')) * 60 + (s[3] - '0') * 10 + (s[4] - '0');
+}
+
+static void test_cfg_defaults_match_vectors(void)
+{
+    const cJSON *d = section("config", "defaults");
+    const cJSON *led = cJSON_GetObjectItemCaseSensitive(d, "led");
+    const cJSON *sched = cJSON_GetObjectItemCaseSensitive(d, "sched");
+    const cJSON *pwr = cJSON_GetObjectItemCaseSensitive(d, "pwr");
+    const hb_cfg_t *c = &hb_cfg_default;
+    TEST_ASSERT_EQUAL_INT(num(led, "bright"), c->bright);
+    TEST_ASSERT_EQUAL(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(sched, "on")), c->sched_on);
+    TEST_ASSERT_EQUAL_INT(num(sched, "tz"), c->tz_min);
+    uint8_t days = 0;
+    for (int i = 0; i < 7; i++) {
+        days |= (uint8_t)((str(sched, "days")[i] == '1') << i);
+    }
+    TEST_ASSERT_EQUAL_HEX8(days, c->days);
+    TEST_ASSERT_EQUAL_INT(hhmm(str(sched, "start")), c->start_min);
+    TEST_ASSERT_EQUAL_INT(hhmm(str(sched, "stop")), c->stop_min);
+    TEST_ASSERT_EQUAL_INT(num(pwr, "idle_nap_min"), c->idle_nap_min);
+    TEST_ASSERT_EQUAL_INT(num(pwr, "nap_wake_min"), c->nap_wake_min);
+    TEST_ASSERT_EQUAL_INT(num(pwr, "batt_low_mv"), c->batt_low_mv);
+    TEST_ASSERT_EQUAL_INT(num(pwr, "batt_off_mv"), c->batt_off_mv);
+    TEST_ASSERT_EQUAL_INT(num(pwr, "batt_cal_ppm"), c->batt_cal_ppm);
+}
+
 int main(void)
 {
     FILE *f = fopen(HB_VECTORS_PATH, "rb");
@@ -249,6 +280,7 @@ int main(void)
     RUN_TEST(test_split_and_reassemble);
     RUN_TEST(test_split_rejects);
     RUN_TEST(test_reassemble_steps);
+    RUN_TEST(test_cfg_defaults_match_vectors);
     int rc = UNITY_END();
     cJSON_Delete(g_vec);
     return rc;
