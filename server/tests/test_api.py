@@ -151,7 +151,7 @@ def test_ip_user_backoff_doubles_and_a_success_resets_it(e):
     e.now[0] += 2
     login(e, "alice")  # success: backoff cleared, its reservation released
     assert bad(e.c).status_code == 401 and bad(e.c).headers["Retry-After"] == "1"
-    assert e.ctx.guard.failed_logins("alice") == 3 and len(e.ctx.guard.times[("ip", "testclient")]) == 4
+    assert e.ctx.guard.failed_logins("alice") == 3 and len(e.ctx.guard.ips["testclient"]) == 4
 
 
 def test_login_never_sleeps(e, monkeypatch):
@@ -170,17 +170,51 @@ def test_claim_attempts_are_limited_per_user(e):
     assert e.c.post("/api/v1/devices/claim", json={"did": A}, headers=login(e, "alice")).status_code == 200
 
 
-def test_guard_memory_is_bounded():
+def blocked(g, ip, user="alice"):
+    try:
+        g.login_start(ip, user)
+    except auth.TooMany:
+        return True
+    g.login_failed(ip, user, known=False)
+    return False
+
+
+def test_spraying_random_usernames_keeps_the_address_blocked():
+    g = auth.Guard(lambda: 0.0, max_keys=5)
+    results = [blocked(g, "198.51.100.9", f"rnd{i}") for i in range(10_000)]
+    assert results == [False] * auth.IP_FAILS + [True] * (10_000 - auth.IP_FAILS)
+    assert list(g.ips) == ["198.51.100.9"] and not g.pairs and not g.users  # unknown names are never stored
+
+
+def test_a_full_table_refuses_newcomers_instead_of_evicting_live_blocks():
     now = [0.0]
-    g = auth.Guard(lambda: now[0], max_keys=5)
-    for i in range(50):
-        g.login_start(f"10.0.0.{i}", f"u{i}")
-        g.login_failed(f"10.0.0.{i}", f"u{i}")
-        now[0] += 1
-    assert len(g.times) <= 5 and len(g.not_before) <= 5
+    g = auth.Guard(lambda: now[0], max_keys=3)
+    for _ in range(auth.IP_FAILS):
+        blocked(g, "192.0.2.1")
+    blocked(g, "192.0.2.2")
+    blocked(g, "192.0.2.3")
+    with pytest.raises(auth.TooMany) as full:
+        g.login_start("192.0.2.4", "alice")  # table full of live entries: fail closed
+    assert full.value.retry_after == auth.WINDOW_S
+    assert blocked(g, "192.0.2.1")  # the live block survives
+    assert not blocked(g, "192.0.2.2")  # known addresses keep working
     now[0] += auth.WINDOW_S
-    g.take(("claim", "x"), 1)
-    assert list(g.times) == [("claim", "x")] and not g.not_before
+    assert not blocked(g, "192.0.2.4")  # expired entries make room
+
+
+def test_ipv6_addresses_in_one_64_share_a_counter():
+    g = auth.Guard(lambda: 0.0)
+    for i in range(auth.IP_FAILS):
+        assert not blocked(g, f"2001:db8:1:2::{i + 1:x}", f"u{i}")
+    assert blocked(g, "2001:db8:1:2:ffff:ffff:ffff:ffff")
+    assert not blocked(g, "2001:db8:1:3::1")
+    assert auth.bucket("::ffff:192.0.2.7") == "192.0.2.7" and auth.bucket("testclient") == "testclient"
+
+
+def test_failed_logins_for_real_users_are_counted_for_the_admin(e):
+    bad(e.c, "alice")
+    bad(e.c, "nobody")
+    assert e.ctx.guard.failed_logins("alice") == 1 and "nobody" not in e.ctx.guard.users
 
 
 def test_generated_passwords_are_long(e):

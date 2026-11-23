@@ -185,7 +185,7 @@ def create_app(ctx: Ctx) -> FastAPI:
             token = ctx.guard.login_start(ip, body.user)
         row = db.one("SELECT * FROM user WHERE uid = ? AND disabled = 0", (body.user,))
         if row is None or not auth.check_password(body.password, row["pw"]):
-            ctx.guard.login_failed(ip, body.user)
+            ctx.guard.login_failed(ip, body.user, known=row is not None)
             raise HTTPException(401, "bad_login")
         ctx.guard.login_ok(ip, body.user, token)
         tok = auth.new_secret()
@@ -203,7 +203,7 @@ def create_app(ctx: Ctx) -> FastAPI:
     @app.post("/api/v1/devices/claim")
     def claim(body: ClaimIn, user=Depends(me)):
         with _limited():  # authenticated, so per user is enough
-            ctx.guard.take(("claim", user["uid"]), CLAIMS)
+            ctx.guard.take_claim(user["uid"], CLAIMS)
         if not DID.fullmatch(body.did):
             raise HTTPException(422, "bad_did")
         row = db.one("SELECT * FROM device WHERE did = ?", (body.did,))
