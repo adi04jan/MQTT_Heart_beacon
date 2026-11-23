@@ -73,6 +73,9 @@ def write_passwd(path: str | Path, entries: list[tuple[str, str]]) -> None:
 # ---- attempt limits ----------------------------------------------------------------
 # Threat model: a home server with 2 admin-created users holding generated 20-character passwords. Guessing is
 # hopeless, so this limits resource abuse (one scrypt per attempt) per client address, not password guessing.
+# Distributed guessing is out of scope for the same reason; accepted on purpose: a many-address spray can evict
+# unblocked entries, and there is no per-user counter (the alternatives, a fail-closed global 429 or per-user
+# lockout and its enumeration oracle, are worse here).
 
 WINDOW_S = 600
 IP_FAILS = 10  # failed logins per address per window (attempts in flight count), then 429
@@ -105,7 +108,7 @@ class Guard:
     """Per-address login limit and per-user claim limit. Never sleeps; every check-and-record is under one lock.
 
     A login attempt is reserved against its address before the password check, so parallel guesses count while
-    in flight; a success deletes the address's entry. Full table: evict the unblocked entry with the fewest
+    in flight; a success releases only its own reservation, so failures against other accounts stay. Full table: evict the unblocked entry with the fewest
     failures (oldest first). A blocked address is never evicted; only when every entry is blocked do new
     addresses get 429.
     """
@@ -135,8 +138,8 @@ class Guard:
                 raise TooMany(hits[0] + WINDOW_S - now)
             self.claims[uid] = hits + [now]
 
-    def login_start(self, ip: str) -> None:
-        """Reserve a login attempt for `ip`; it stays as a failure unless login_ok follows."""
+    def login_start(self, ip: str) -> float:
+        """Reserve a login attempt for `ip`; it stays as a failure unless login_ok(ip, token) follows."""
         b = bucket(ip)
         with self.lock:
             now = self.clock()
@@ -151,10 +154,13 @@ class Guard:
                     raise TooMany(min(v[0] for v in self.ips.values()) + WINDOW_S - now)
                 del self.ips[min(free, key=lambda k: (len(self.ips[k]), self.ips[k][0]))]
             self.ips[b] = hits + [now]
+            return now
 
-    def login_ok(self, ip: str) -> None:
+    def login_ok(self, ip: str, token: float) -> None:
         with self.lock:
-            self.ips.pop(bucket(ip), None)
+            hits = self.ips.get(bucket(ip), [])
+            if token in hits:
+                hits.remove(token)
 
 
 def reload_broker(unit: str = "hb-mosquitto.service") -> None:

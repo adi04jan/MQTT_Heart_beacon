@@ -184,13 +184,13 @@ def create_app(ctx: Ctx) -> FastAPI:
     def login(body: LoginIn, request: Request):
         ip = request.client.host
         with _limited():
-            ctx.guard.login_start(ip)
+            token = ctx.guard.login_start(ip)
         row = db.one("SELECT * FROM user WHERE uid = ? AND disabled = 0", (body.user,))
         # Unknown user and wrong password look the same: same answer, and a hash check either way.
         if not auth.check_password(body.password, row["pw"] if row else auth.DUMMY_HASH) or row is None:
             log.warning("failed login for %r from %s", body.user, ip)
             raise HTTPException(401, "bad_login")
-        ctx.guard.login_ok(ip)
+        ctx.guard.login_ok(ip, token)
         tok = auth.new_secret()
         db.x("INSERT INTO session VALUES (?, ?, ?)", (_token_hash(tok), row["uid"], int(ctx.clock())))
         return {"token": tok, "uid": row["uid"], "name": row["name"],

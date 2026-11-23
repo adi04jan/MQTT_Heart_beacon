@@ -148,12 +148,13 @@ def test_blocked_ip_does_not_block_the_user_elsewhere_and_says_when(e):
     assert y.post("/api/v1/login", json={"user": "alice", "pass": e.pw["alice"]}).status_code == 200
 
 
-def test_a_successful_login_frees_its_entry(e):
-    for _ in range(3):
-        bad(e.c)
-    assert len(e.ctx.guard.ips["testclient"]) == 3
-    login(e, "alice")
-    assert "testclient" not in e.ctx.guard.ips
+def test_a_success_releases_only_its_own_reservation(e):
+    for _ in range(auth.IP_FAILS - 1):
+        assert bad(e.c, "bob").status_code == 401
+    login(e, "alice")  # a valid login for another account from the same address
+    assert len(e.ctx.guard.ips["testclient"]) == auth.IP_FAILS - 1  # bob's failures still count
+    assert bad(e.c, "bob").status_code == 401  # the last one the window allows
+    assert bad(e.c, "bob").status_code == 429
 
 
 def test_login_never_sleeps(e, monkeypatch):
