@@ -430,11 +430,11 @@ def save_state(db, st: State) -> None:
 class Glue:
     """paho-mqtt <-> route(). One lock around route + persist; publishes go out after the lock."""
 
-    def __init__(self, db, host: str, port: int, password: str, clock=time.time):
+    def __init__(self, db, host: str, port: int, password: str, clock=time.time, loader=load_directory):
         import paho.mqtt.client as mqtt
 
-        self.db, self.host, self.port, self.clock = db, host, port, clock
-        self.lock = threading.Lock()
+        self.db, self.host, self.port, self.clock, self.loader = db, host, port, clock, loader
+        self.lock = threading.RLock()
         self.state = load_state(db, int(clock()))
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="router", protocol=mqtt.MQTTv5)
         self.client.username_pw_set("router", password)
@@ -476,5 +476,7 @@ class Glue:
             self.client.publish(p.topic, p.payload, qos=1, retain=p.retain)
 
     def refresh(self) -> None:
-        """Pick up users and claims changed by the API or admin."""
-        self.handle(Directory(*load_directory(self.db), int(self.clock())))
+        """Pick up users and claims changed by the API or admin. Load and apply under one lock, or an older
+        snapshot from a concurrent refresh could land after a newer one."""
+        with self.lock:
+            self.handle(Directory(*self.loader(self.db), int(self.clock())))

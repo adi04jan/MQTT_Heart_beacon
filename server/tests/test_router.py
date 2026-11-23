@@ -2,6 +2,7 @@
 receipts, burst coalescing, flush on wake. Pure: time and ids are injected."""
 import itertools
 import json
+import threading
 
 from hb_server import models
 from hb_server.db import Db
@@ -247,6 +248,36 @@ def test_reclaim_by_another_user_expires_the_old_owners_queue():
     later += tick(st, 1060)
     assert [t for t, *_ in later if not t.endswith(f"{B}/down")] == []  # nothing to bob, no rcpt at all
     assert [p["t"] for t, p, *_ in later if t.endswith(f"{B}/down")] == ["time"]  # no old show reaches dave's B
+
+
+def test_concurrent_refreshes_apply_the_newest_directory(tmp_path):
+    from hb_server import router
+    db = Db(str(tmp_path / "hb.db"))
+    for uid in ("bob", "dave"):
+        db.x("INSERT INTO user (uid, name, pw, mqtt_pass, mqtt_hash) VALUES (?, ?, '', '', '')", (uid, uid))
+    db.x("INSERT INTO device (did, owner, claimed, registered) VALUES (?, 'bob', 1, 0)", (B,))
+    first_loaded, gate, calls = threading.Event(), threading.Event(), []
+
+    def loader(d):
+        snap = router.load_directory(d)
+        calls.append(snap)
+        if len(calls) == 1:  # the first refresh holds its old snapshot until the second one has had its chance
+            first_loaded.set()
+            gate.wait(5)
+        return snap
+
+    g = router.Glue(db, "127.0.0.1", 1, "pw", clock=lambda: 1000, loader=loader)
+    t1 = threading.Thread(target=g.refresh)
+    t1.start()
+    assert first_loaded.wait(5)
+    db.x("UPDATE device SET owner = 'dave' WHERE did = ?", (B,))  # a re-claim lands meanwhile
+    t2 = threading.Thread(target=g.refresh)
+    t2.start()
+    t2.join(0.5)  # unfixed: t2 loads and applies the new owner now, and t1 then overwrites it
+    gate.set()
+    t1.join(5)
+    t2.join(5)
+    assert g.state.beacons[B].owner == "dave"
 
 
 def test_reclaim_by_the_same_owner_keeps_the_queue():
