@@ -67,7 +67,7 @@ stateDiagram-v2
 
 | # | Topic | Recommendation | Trade-off |
 |---|---|---|---|
-| 1 | Firmware framework | ESP-IDF v5.5.x via `idf.py`, NimBLE (peripheral only), esp-mqtt (MQTT 5), `CONFIG_PM_ENABLE` + tickless idle. All logic in a pure C core driven by one event loop. | Full rewrite of the Arduino sketch; v6.0.x is newer (search-sourced) but has breaking changes and fewer field hours. |
+| 1 | Firmware framework | ESP-IDF **v5.3.3** via `idf.py` (installed at `C:\esp\esp-idf`, the version the AI-Notes-recorder firmware builds with), NimBLE (peripheral only), esp-mqtt (MQTT 5), `CONFIG_PM_ENABLE` + tickless idle. All logic in a pure C core driven by one event loop. | Full rewrite of the Arduino sketch; 5.5.x and 6.0.x are newer, but 5.3.3 is installed and proven on the reference hardware. Revisit only if a needed fix lands later. |
 | 1b | Power states | PAIRING, NEAR, AWAY, OFFLINE, NAP, SLEEP, LOWBATT (table below). ACTIVE is a transient overlay while an effect plays. | NAP/SLEEP are deep sleep, so the beacon is unreachable until timer or button. |
 | 2 | Transport selection | Phone is the gateway whenever a bonded encrypted link is up and the phone reports its server link up; otherwise device WiFi. The **router** tracks each beacon's current path and is the only queue. | Server holds delivery state (about 100 lines) instead of leaning on broker sessions, because a broker session cannot see BLE-path deliveries. |
 | 3 | BLE contract | One service, two characteristics (RX write, TX notify), same JSON envelope as MQTT with 1-byte fragmentation header. LE Secure Connections, Just Works, new bonds only inside a button-opened 2 min window. | JSON costs bytes over a compact binary format; in exchange the phone relays payloads verbatim. |
@@ -315,7 +315,7 @@ v1 defects and where each is designed out:
 
 ## Milestones
 
-One command for everything hardware-free: `./test.sh` (and `test.ps1`) runs firmware ctest, server `uv run pytest`, Android `./gradlew test`, and the simulator end-to-end test.
+One command for everything hardware-free: `./test.sh` (and `test.ps1`) runs firmware ctest, server pytest (in `server/.venv`; `uv run pytest` once uv is installed), Android `./gradlew test`, and from M5 the simulator end-to-end test.
 
 ### M0: contract and skeletons
 
@@ -429,7 +429,7 @@ Exit: measured SLEEP current under 0.1 mA and the gated column of the power tabl
 | Doze delays phone notifications | Exemption + measurement in M5; FCM is the only real fix. |
 | Server IP changes | `srv.hosts` list pushed ahead of the move; leaf certificate reissued from the same CA. |
 | RAM with WiFi + BLE + TLS together | One BLE connection, dynamic mbedTLS buffers, heap low-water in telemetry (the reference repo's `CLAUDE.md` records NimBLE buffer growth costing kilobytes). |
-| Stock bootloader lacks rollback | Checked in M0; if absent, M7 rollback needs a USB bootloader update and OTA-migrated units run without it. |
+| Stock bootloader lacks rollback | **Checked in M0: enabled.** The installed core (esp32 3.2.1, IDF 5.4.2) sdkconfig `esp32-arduino-libs/idf-release_v5.4-858a988d-v1/esp32c3/sdkconfig` has `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` (anti-rollback off, secure boot off). So M7 rollback needs no bootloader change, but the v1 app writes the v2 image as NEW: the v2 app must call `esp_ota_mark_app_valid_cancel_rollback()` after its self-test, including the M8 migration image, or the bootloader returns the unit to v1 on the next reset. Units first flashed with an older core carry that core's bootloader: confirm on the M8 bench unit before the fleet OTA. |
 
 ## Sources
 
@@ -441,7 +441,7 @@ Exit: measured SLEEP current under 0.1 mA and the gated column of the power tabl
 - ESP32-C3 datasheet (deep-sleep current): https://documentation.espressif.com/esp32-c3_datasheet_en.html
 - Espressif low-power introduction (light-sleep current): https://docs.espressif.com/projects/esp-techpedia/en/latest/esp-friends/advanced-development/performance/lowpower/lowpower-fundamental.html
 
-Not verified by a source and marked for checking in the milestone named: `%u` substitution in dynsec ACLs (M2, plan avoids it), stock bootloader rollback (M0), v1 WiFi credentials surviving in NVS (M8), Android 16 bond-loss handling (M5), exact latest ESP-IDF patch releases (M0).
+Not verified by a source and marked for checking in the milestone named: `%u` substitution in dynsec ACLs (M2, plan avoids it), v1 WiFi credentials surviving in NVS (M8), Android 16 bond-loss handling (M5). Settled in M0: stock bootloader rollback (enabled, see Risks); ESP-IDF version (pinned to the installed v5.3.3).
 
 ## Answers from the user (2026-11-23)
 

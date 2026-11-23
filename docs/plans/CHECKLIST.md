@@ -61,10 +61,10 @@ Tick a box only after its bench check passed.
 ## C. v2 milestones
 
 ### M0 contract + skeletons
-- [ ] `protocol/PROTOCOL.md` + `vectors.json` (envelope, BLE framing, topics, config schema)
-- [ ] Codecs in C / Kotlin / Python pass the same vectors
-- [ ] Root `test.sh` / `test.ps1` runs every host test
-- [ ] Check stock bootloader rollback support (sdkconfig read)
+- [x] `protocol/PROTOCOL.md` + `vectors.json` (envelope, BLE framing, topics, config schema)
+- [x] Codecs in C / Kotlin / Python pass the same vectors (envelope + frames in all three; config vectors in Python now, C `hb_config` in M3)
+- [x] Root `test.sh` / `test.ps1` runs every host test (green from a clean clone, 2026-11-23)
+- [x] Check stock bootloader rollback support (sdkconfig read): `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`; v2 must mark itself valid (plan, Risks)
 
 ### M1 firmware core, radios off (ESP-IDF)
 - [ ] Pure `hb_core`: button gestures, LED effects, battery w/ hysteresis, schedule, power policy + host tests
