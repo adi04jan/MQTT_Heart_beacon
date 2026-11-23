@@ -47,15 +47,16 @@ Tick a box only after its bench check passed.
 - [ ] Release to other beacons by OTA: `firmware_0.1.1.bin` + `version.txt`
 - [ ] Optional bridge fixes while Telegram lives: sender allow-list, forward only `Miss you` to non-admins
 
-## B. v2 decisions (open questions, plan end)
-- [ ] 1. v1 fleet size/location; can owners install the app
-- [ ] 2. Who gets the app; Android versions/brands; any iPhone
-- [ ] 3. Office WiFi type; outbound 8883/8443 open
-- [ ] 4. LED power switch (respin or bodge); battery capacity; divider values
-- [ ] 5. Firebase push allowed as Doze fallback
-- [ ] 6. Circles: one per user enough
-- [ ] 7. Missed hearts: play on wake (default 24 h, coalesced) or drop
-- [ ] 8. Server/VPS and IP; backups; SSH-tunnel-only admin OK
+## B. v2 decisions (answered 2026-11-23, see plan "Answers from the user")
+- [x] 1. Fleet: 2 beacons, both owners on Android
+- [x] 2. Phones: all Android 14+
+- [x] 3. Office WiFi: plain password, ports open
+- [x] 4. Hardware: no change for now (rev A, LED floor stays)
+- [x] 5. FCM: decide after M5 measurement
+- [x] 6. Circles: one circle, everyone receives
+- [x] 7. Missed hearts: play on wake, coalesced, 24 h
+- [x] 8. Server: existing home server via public IP (SSH-tunnel admin)
+- [ ] Follow-up: is the home ISP public IP static? (needed before M2; port-forward 8883/8443)
 
 ## C. v2 milestones
 

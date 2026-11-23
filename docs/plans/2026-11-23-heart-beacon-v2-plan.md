@@ -443,7 +443,20 @@ Exit: measured SLEEP current under 0.1 mA and the gated column of the power tabl
 
 Not verified by a source and marked for checking in the milestone named: `%u` substitution in dynsec ACLs (M2, plan avoids it), stock bootloader rollback (M0), v1 WiFi credentials surviving in NVS (M8), Android 16 bond-loss handling (M5), exact latest ESP-IDF patch releases (M0).
 
-## Open questions for the user
+## Answers from the user (2026-11-23)
+
+| # | Answer | Consequence for the plan |
+|---|---|---|
+| 1 | 2 beacons, both owners on Android | M8 is two units; both owners re-add via the app. |
+| 2 | All phones Android 14+ | minSdk 34 / target 36 stays. No iPhone path. |
+| 3 | Office WiFi: plain password, outbound ports open | AWAY over office WiFi works; NEAR is a power choice, not a necessity. |
+| 4 | No hardware change for now | Rev A only; LED floor (5-9 mA est.) stays, so battery life is days, not weeks. M9 parked. Schedule/NAP still worth it but gains are modest; measure in M1. |
+| 5 | FCM: decide after measuring | Build without FCM; M5 overnight Doze measurement decides. |
+| 6 | One circle, everyone receives | Single circle per user; no per-message targeting. |
+| 7 | Missed hearts: play on wake, coalesced, 24 h | As planned (M6). v1.2 already queues via persistent session (uncoalesced). |
+| 8 | Server: existing home server | Broker + API on the home box, reached by the home **public IP** with port forwards for 8883/8443. Risk: residential IP may change; keep the `srv.hosts` list in config and an app-side server-address override, and check whether the ISP IP is static before M2. Admin stays SSH-tunnel only. |
+
+## Open questions for the user (answered above)
 
 1. v1 fleet: how many units, where are they, and can each owner install the Android app to re-add their beacon after the OTA?
 2. Users and phones: who gets the app, which Android versions and brands, any iPhone? (An iPhone owner gets a WiFi-only beacon and no app in this plan.)
