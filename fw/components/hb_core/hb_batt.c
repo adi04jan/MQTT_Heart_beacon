@@ -19,12 +19,22 @@ static void thresholds(hb_batt_t *b, const hb_cfg_t *cfg)
 
 void hb_batt_seed(hb_batt_t *b, uint32_t raw_mv, const hb_cfg_t *cfg)
 {
+    if (raw_mv == 0) {
+        return;  // failed read: keep what we had
+    }
     b->f_q4 = calibrated(raw_mv, cfg) << 4;
     thresholds(b, cfg);
 }
 
 void hb_batt_add(hb_batt_t *b, uint32_t raw_mv, const hb_cfg_t *cfg)
 {
+    if (b->f_q4 == 0) {
+        hb_batt_seed(b, raw_mv, cfg);  // no reading yet
+        return;
+    }
+    if (raw_mv == 0) {
+        return;
+    }
     int32_t x = (int32_t)(calibrated(raw_mv, cfg) << 4);
     b->f_q4 = (uint32_t)((int32_t)b->f_q4 + (x - (int32_t)b->f_q4) / 4);
     thresholds(b, cfg);

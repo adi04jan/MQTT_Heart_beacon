@@ -1,5 +1,6 @@
 // hb_batt: the one battery filter (v1 shared a moving window between callers). Raw samples are battery
-// mV already scaled by the divider; the config's ppm correction is applied here.
+// mV already scaled by the divider; the config's ppm correction is applied here. A raw 0 is a failed
+// read and is ignored; until the first good read hb_batt_mv() is 0 and no flag is set.
 #pragma once
 
 #include <stdbool.h>

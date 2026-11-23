@@ -278,6 +278,20 @@ static void test_batt_thresholds_have_hysteresis(void)
     TEST_ASSERT_FALSE(b.off);
 }
 
+static void test_failed_adc_read_never_means_empty(void)
+{
+    const hb_cfg_t *cfg = &hb_cfg_default;
+    hb_batt_t b = {0};
+    hb_batt_seed(&b, 0, cfg);
+    TEST_ASSERT_FALSE(b.off);
+    TEST_ASSERT_EQUAL_UINT32(0, hb_batt_mv(&b));
+    hb_batt_add(&b, 3900, cfg);  // first good read seeds, not 1/4 of it
+    TEST_ASSERT_EQUAL_UINT32(3900, hb_batt_mv(&b));
+    hb_batt_add(&b, 0, cfg);
+    TEST_ASSERT_EQUAL_UINT32(3900, hb_batt_mv(&b));
+    TEST_ASSERT_FALSE(b.off);
+}
+
 // ---- schedule --------------------------------------------------------------------------------------
 
 // Epochs in IST (+05:30), 2026-11-23 is a Monday.
@@ -676,6 +690,7 @@ int main(void)
     RUN_TEST(test_low_battery_blinks_pixel_zero_three_times);
     RUN_TEST(test_batt_filter_calibration_and_pct);
     RUN_TEST(test_batt_thresholds_have_hysteresis);
+    RUN_TEST(test_failed_adc_read_never_means_empty);
     RUN_TEST(test_schedule_office_week);
     RUN_TEST(test_schedule_unknown_clock_or_off_is_in_hours);
     RUN_TEST(test_schedule_midnight_wrap);
