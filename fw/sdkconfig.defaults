@@ -1,0 +1,30 @@
+# Heart Beacon v2, ESP-IDF v5.3.3, MakerGO ESP32-C3 SuperMini (4 MB flash, no 32 kHz crystal).
+# sdkconfig is generated from this file: idf.py -C fw set-target esp32c3
+CONFIG_IDF_TARGET="esp32c3"
+
+# Flash and partitions: arduino-esp32's stock 4 MB layout (partitions.csv is a byte copy of
+# esp32 3.2.1 tools/partitions/default.csv), so a v1 unit can take this image over the air.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Same as the v1 bootloader (arduino-esp32 3.2.1 esp32c3 sdkconfig): an image is NEW until the app
+# confirms it, so main.c calls esp_ota_mark_app_valid_cancel_rollback().
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Power: frequency scaling + automatic light sleep, tickless idle (as AI-Notes-recorder/firmware).
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_80=y
+# No 32 kHz crystal on rev A: internal RC slow clock (HB_HAS_XTAL32K=n).
+CONFIG_RTC_CLK_SRC_INT_RC=y
+
+# Console on the native USB-Serial/JTAG. While a USB host is attached, auto light sleep is held off so
+# the log stays up on the bench; on battery (no host) the chip light-sleeps as normal.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
+
+# Size: the image has to fit the 1.18 MB gate for the life of rev A.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
