@@ -443,6 +443,15 @@ Exit: measured SLEEP current under 0.1 mA and the gated column of the power tabl
 
 Not verified by a source and marked for checking in the milestone named: `%u` substitution in dynsec ACLs (M2, plan avoids it), v1 WiFi credentials surviving in NVS (M8), Android 16 bond-loss handling (M5). Settled in M0: stock bootloader rollback (enabled, see Risks); ESP-IDF version (pinned to the installed v5.3.3).
 
+## Plan changes after the answers (2026-11-23)
+
+| Change | Why |
+|---|---|
+| **Broker: a separate Mosquitto instance for v2** on the home server (own config dir, own systemd unit, TLS 8883 + loopback 1883 for the router), not the shared broker. Uses the installed **Mosquitto 1.6.9**: no Dynamic Security plugin, so per-client auth is `password_file` (server-managed, reload via SIGHUP) + a static `acl_file` with `pattern` lines (`%u` = `did` for beacons, `uid` for phones). Router has `topic readwrite hb/v1/#`. Supersedes "dynsec" in Decisions 5 and 7, the topics table and the claim flow. | The shared broker (1.6.9) also serves the water-tank sensor, Frigate and the payload logger; v2 changes must not touch it. 1.6.9 supports MQTT 5 but not dynsec. |
+| **Office schedule seed** for both beacons: Mon-Sat 09:00-19:00, tz +330. | User's office hours. |
+| **NAP default** still open (lead recommends off by default on rev A: ~25 % saving for up to 15 min latency). Keep it a config value. | Awaiting user. |
+| **Parallel tracks**: `feature/v2-fw` (M1 host logic + IDF skeleton build, radios off), `feature/v2-server` (M2 code, no deployment), `feature/v2-app` (M5 groundwork on fakes). `protocol/` is frozen during the round; contract changes are proposed, not edited. Merged into `feature/v2` by the lead. | Three independent codebases sharing one contract. |
+
 ## Answers from the user (2026-11-23)
 
 | # | Answer | Consequence for the plan |
