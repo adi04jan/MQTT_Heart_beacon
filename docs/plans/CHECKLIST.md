@@ -39,11 +39,12 @@ Tick a box only after its bench check passed.
 - [x] Clean MQTT disconnect before deep sleep (broker starts queueing at once)
 
 ### A3. To finish v1 (needs you)
-- [ ] Broker: `queue_qos0_messages true` (beacons can only publish QoS 0; probe showed QoS 0 is dropped for offline beacons today)
-- [ ] OK to flash COM6 with the real topic (boot sends `Online` + details -> Telegram forwards as "Miss you")
+- [x] Broker: `queue_qos0_messages true` (live 2026-11-23 via reload; probe delivered a queued QoS 0 message)
+- [x] COM6 flashed with 0.1.1 on the real topic (verified `retain=0` on the live broker)
 - [ ] Measure current on COM6 (meter in the battery lead): connected idle, deep sleep
 - [ ] Clear stale retained message on the live topic after all beacons run >= 0.1.0 (`mosquitto_pub -r -n -t <topic>`)
-- [ ] Commit branch + PR
+- [x] Commit branch (`feature/v1.2-wifi-power-queue`, local) - [ ] push + PR
+- [ ] 0.1.2 office-hours schedule (Mon-Sat 09:00-19:00 IST): host tests pass; bench test blocked until COM6 is back on USB
 - [ ] Release to other beacons by OTA: `firmware_0.1.1.bin` + `version.txt`
 - [ ] Optional bridge fixes while Telegram lives: sender allow-list, forward only `Miss you` to non-admins
 

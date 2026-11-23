@@ -142,13 +142,35 @@ deep sleep is not µA on this hardware.
   play once on wake (coalesced, 24 h); FCM decided after measuring; server = the existing home server reached by
   its public IP (no domain, not the old address).
 - Reference for BLE, background service and test rigs: `D:\Personal\Project\AI-Notes-recorder` (read-only).
+- Layout: `protocol/` (normative `PROTOCOL.md` + `vectors.json`, the one contract), `fw/components/hb_core/`
+  (pure C: envelope + BLE frame codec), `fw/test/host/` (CMake + vendored Unity/cJSON), `server/` (Python wire
+  models), `android/` (`:core` pure-JVM codec). All three codecs are tested against the same `vectors.json`; change
+  the contract there first. Decode rules not obvious from the plan (error-code order, frame "skip" state, `NaN`
+  rejection) are written in `PROTOCOL.md`.
+- The v2 app must call `esp_ota_mark_app_valid_cancel_rollback()`: the stock bootloader on v1 units has
+  `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`, so an unconfirmed image falls back to v1 on the next reset.
+
+v2 tests (hardware-free, ~1 min):
+
+```bash
+./test.sh                     # or: pwsh -File test.ps1 ; runs all three suites
+# firmware hb_core only (MinGW gcc or WSL gcc; don't use `ctest --test-dir`, WSL cmake 3.16 lacks it)
+cmake -S fw/test/host -B fw/test/host/build -G Ninja -DCMAKE_C_COMPILER=gcc && cmake --build fw/test/host/build \
+  && (cd fw/test/host/build && ctest --output-on-failure)
+cd server && .venv/Scripts/python.exe -m pytest -q          # .venv/bin/python on Linux; venv is gitignored
+cd android && ./gradlew test --no-daemon                     # JDK 21; JAVA_HOME points at a missing JDK 17
+```
+
+IDF environment: `. C:\esp\esp-idf\export.ps1` (PowerShell), `export.bat` (cmd), `. /c/esp/esp-idf/export.sh`
+(Git Bash).
 
 ## Broker and server
 
 The Mosquitto broker runs on the user's home server (the bridge reaches it as `localhost`). It is **shared with
 the water-tank sensor system**: broker changes go through the user, keep that system working, and prefer
-`systemctl reload mosquitto` over a restart. Pending broker change for queued beacon-to-beacon hearts:
-`queue_qos0_messages true` (leave `max_queued_messages` at its global default).
+`systemctl reload mosquitto` over a restart. Mosquitto 1.6.9; since 2026-11-23 it has
+`/etc/mosquitto/conf.d/heart-queue.conf` = `queue_qos0_messages true`, so QoS 0 messages are queued for offline
+persistent sessions (only the beacons use `cleanSession=false`). Rollback: remove that file and reload.
 
 ## Bridge service (server)
 
