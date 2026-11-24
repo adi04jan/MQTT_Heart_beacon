@@ -108,7 +108,9 @@ fun DeviceSettingsScreen(vm: DeviceSettingsVm, onBack: () -> Unit, onRemoved: ()
             item {
                 Row {
                     Column(Modifier.weight(1f)) { ItemRow("Wakes", hhmm(cur.start), onClick = { dialog = Dialog.START }) }
-                    Column(Modifier.weight(1f)) { ItemRow("Sleeps", hhmm(cur.stop), onClick = { dialog = Dialog.STOP }) }
+                    Column(Modifier.weight(1f)) {
+                        ItemRow("Sleeps", fmt.sleeps(LocalTime.parse(cur.start), LocalTime.parse(cur.stop)), onClick = { dialog = Dialog.STOP })
+                    }
                 }
             }
 
