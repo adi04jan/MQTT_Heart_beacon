@@ -1,0 +1,5 @@
+TEST ONLY (M3 dev): the protocol/vectors.json config.signature test key. Replace with the deploy cfg-sign.pub before the bench.
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEJVOF+1kg71RmM6iqzFSR8IFpgr1j
+zZsAocjL+Zor408SF0clL26enQBMF0AG4wMIK1LWEA+7jmjJudP1dRSe6g==
+-----END PUBLIC KEY-----

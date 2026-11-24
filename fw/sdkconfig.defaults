@@ -28,3 +28,8 @@ CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 
 # Size: the image has to fit the 1.18 MB gate for the life of rev A.
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# M3: WiFi station + MQTT 5 over TLS (esp-mqtt). The main task verifies config signatures (mbedTLS ECDSA) and
+# prints messages, so it gets more than the 3.5 KB default stack.
+CONFIG_MQTT_PROTOCOL_5=y
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

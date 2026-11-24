@@ -2,10 +2,19 @@
 #include "unity.h"
 #include "hb_core.h"
 #include "hb_policy.h"
+#include "hb_wire.h"
+
+#include <stdio.h>
 
 #include <string.h>
 
-void setUp(void) {}
+static bool g_wifi, g_cached;  // hb_boot_t.wifi / .ap_cached for the next boot()
+static bool g_emit;            // run every step's actions through hb_wire_emit into g_pubs
+
+void setUp(void)
+{
+    g_wifi = g_cached = g_emit = false;
+}
 void tearDown(void) {}
 
 // ---- hb_button -------------------------------------------------------------------------------------
@@ -376,6 +385,49 @@ static hb_mood_t g_mood;  // last mood sent
 static hb_up_t g_ups[64];  // every uplink since boot()
 static int g_n_ups;
 static int g_measured, g_measured_lit, g_low_starts;
+static struct {
+    uint8_t cmd;  // hb_link_cmd_t
+    uint32_t t;
+} g_links[64];  // every link command since boot()
+static int g_n_links, g_teles, g_reports;
+
+static struct {
+    char topic[HB_TOPIC_MAX];
+    char json[HB_MSG_MAX_BEACON + 1];
+    bool retain, mood;
+    hb_path_t path;
+    uint64_t id;
+} g_pubs[32];
+static int g_n_pubs;
+static const hb_wire_ctx_t g_x = {.did = "HB-3FA2C1", .fw = "2.0.0-test", .hw = "A", .rst = "poweron", .rssi = -61,
+                                  .heap = 1234};
+
+static void cap(void *arg, const hb_pub_t *p)
+{
+    (void)arg;
+    TEST_ASSERT_EQUAL_size_t(strlen(p->json), (size_t)p->len);
+    if (g_n_pubs < 32) {
+        snprintf(g_pubs[g_n_pubs].topic, HB_TOPIC_MAX, "%s", p->topic);
+        snprintf(g_pubs[g_n_pubs].json, sizeof g_pubs[0].json, "%s", p->json);
+        g_pubs[g_n_pubs].retain = p->retain;
+        g_pubs[g_n_pubs].mood = p->mood;
+        g_pubs[g_n_pubs].path = p->path;
+        g_pubs[g_n_pubs++].id = p->id;
+    }
+}
+
+static void rec(void)
+{
+    if (g_emit) {
+        hb_wire_emit(&core, &act, &g_x, now, cap, NULL);
+    }
+    if (act.link && g_n_links < 64) {
+        g_links[g_n_links].cmd = act.link;
+        g_links[g_n_links++].t = now;
+    }
+    g_teles += act.tele;
+    g_reports += act.state_changed;
+}
 
 static void boot(hb_wake_t wake, bool claimed, bool pressed, uint32_t mv, uint32_t epoch)
 {
@@ -383,8 +435,11 @@ static void boot(hb_wake_t wake, bool claimed, bool pressed, uint32_t mv, uint32
     g_mv = mv;
     g_mood = HB_MOOD_NONE;
     g_n_ups = 0;
-    hb_boot_t b = {.wake = wake, .claimed = claimed, .pressed = pressed, .mv = mv, .epoch = epoch, .seed = 42};
+    g_n_links = g_teles = g_reports = g_n_pubs = 0;
+    hb_boot_t b = {.wake = wake, .claimed = claimed, .pressed = pressed, .mv = mv, .epoch = epoch, .seed = 42,
+                   .wifi = g_wifi, .ap_cached = g_cached};
     hb_core_boot(&core, &g_cfg, &b, now, &act);
+    rec();
 }
 
 static void step(const hb_ev_t *ev)
@@ -400,6 +455,7 @@ static void step(const hb_ev_t *ev)
         }
     }
     g_low_starts += core.fx.kind == HB_FX_LOW && (before.kind != HB_FX_LOW || before.t0 != core.fx.t0);
+    rec();
 }
 
 // Runs like the port: waits act.next_ms, answers measure_batt with g_mv, holds the button level
@@ -827,6 +883,350 @@ static void test_duplicate_show_answers_shown_without_replaying(void)
     TEST_ASSERT_EQUAL_INT(before, g_n_ups);
 }
 
+// ---- hb_link: WiFi + MQTT through hb_core ---------------------------------------------------------
+
+static void wifi(bool up)
+{
+    hb_ev_t e = {.type = HB_EV_WIFI, .up = up};
+    step(&e);
+}
+
+static void mqtt(bool up)
+{
+    hb_ev_t e = {.type = HB_EV_MQTT, .up = up};
+    step(&e);
+}
+
+static uint8_t last_link(void)
+{
+    return g_n_links ? g_links[g_n_links - 1].cmd : HB_LINK_NONE;
+}
+
+static void test_link_backoff_5s_15s_60s_5m_15m_then_30m_and_never_sleeps(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_SCAN, last_link());  // nothing cached yet: scan
+    static const uint32_t want[] = {5000, 15000, 60000, 300000, 900000, 1800000, 1800000, 1800000};
+    for (int i = 0; i < 8; i++) {
+        wifi(false);  // no known AP answered
+        TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+        uint32_t t0 = now;
+        int n = g_n_links;
+        TEST_ASSERT_FALSE(run(want[i] + 200, false));  // light sleep in OFFLINE: no deep sleep, no reboot
+        TEST_ASSERT_EQUAL_INT(n + 1, g_n_links);
+        TEST_ASSERT_EQUAL_UINT8(HB_LINK_SCAN, last_link());
+        TEST_ASSERT_EQUAL_UINT32(t0 + want[i], g_links[g_n_links - 1].t);
+        TEST_ASSERT_EQUAL_INT(HB_ST_OFFLINE, act.state);
+    }
+}
+
+static void test_link_cached_ap_first_then_scan_at_once_then_mqtt(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = g_cached = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());
+    wifi(false);  // the cached BSSID is gone
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_SCAN, last_link());
+    TEST_ASSERT_EQUAL_UINT32(g_links[0].t, g_links[1].t);  // no wait before the scan
+    wifi(true);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_MQTT, last_link());
+    TEST_ASSERT_EQUAL_INT(HB_ST_OFFLINE, act.state);  // an IP alone is no path to the server
+    mqtt(true);
+    TEST_ASSERT_EQUAL_INT(HB_ST_AWAY, act.state);
+    TEST_ASSERT_TRUE(act.state_changed && act.tele);
+
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);  // a cached AP that never answers: scan after 5 s
+    uint32_t t0 = now;
+    run(HB_LINK_FAST_MS + 100, false);
+    TEST_ASSERT_EQUAL_INT(2, g_n_links);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_SCAN, last_link());
+    TEST_ASSERT_EQUAL_UINT32(t0 + HB_LINK_FAST_MS, g_links[1].t);
+}
+
+static void test_link_drop_retries_after_1s_then_backs_off(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    wifi(true);
+    mqtt(true);
+    run(2000, false);
+    mqtt(false);  // broker or AP gone
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+    TEST_ASSERT_EQUAL_INT(HB_ST_OFFLINE, act.state);
+    uint32_t t0 = now;
+    run(HB_LINK_QUICK_MS + 100, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());  // the join cached the AP
+    TEST_ASSERT_EQUAL_UINT32(t0 + HB_LINK_QUICK_MS, g_links[g_n_links - 1].t);
+    wifi(false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_SCAN, last_link());
+    wifi(false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+    t0 = now;
+    run(5100, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());
+    TEST_ASSERT_EQUAL_UINT32(t0 + 5000, g_links[g_n_links - 1].t);
+    wifi(true);
+    mqtt(true);
+    TEST_ASSERT_EQUAL_INT(HB_ST_AWAY, act.state);
+    mqtt(false);  // a success reset the count: the next failed round waits 5 s again
+    run(HB_LINK_QUICK_MS, false);
+    wifi(false);
+    wifi(false);
+    t0 = now;
+    run(5100, false);
+    TEST_ASSERT_EQUAL_UINT32(t0 + 5000, g_links[g_n_links - 1].t);
+}
+
+static void test_link_mqtt_without_connack_is_a_failed_round(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    wifi(true);
+    uint32_t t0 = now;
+    run(HB_LINK_MQTT_MS + 100, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+    TEST_ASSERT_EQUAL_UINT32(t0 + HB_LINK_MQTT_MS, g_links[g_n_links - 1].t);
+    wifi(false);  // a late disconnect from the teardown is ignored while waiting
+    mqtt(false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+    run(5000, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());
+}
+
+static void test_every_connect_reports_state_then_tele_every_tele_min(void)
+{
+    g_cfg = hb_cfg_default;
+    g_cfg.tele_min = 2;
+    g_wifi = true;
+    boot(HB_WAKE_POWERON, false, false, 3900, 0);  // unclaimed: PAIRING, the state does not change on connect
+    wifi(true);
+    int reports = g_reports;
+    mqtt(true);
+    TEST_ASSERT_EQUAL_INT(HB_ST_PAIRING, act.state);
+    TEST_ASSERT_TRUE(act.state_changed);
+    TEST_ASSERT_EQUAL_INT(reports + 1, g_reports);
+    TEST_ASSERT_EQUAL_INT(1, g_teles);
+    run(2 * 60000 + 100, false);
+    TEST_ASSERT_EQUAL_INT(2, g_teles);
+    run(2 * 60000, false);
+    TEST_ASSERT_EQUAL_INT(3, g_teles);
+    wifi(false);
+    run(10 * 60000, false);  // link down: no tele, even after reconnect attempts fail
+    TEST_ASSERT_EQUAL_INT(3, g_teles);
+}
+
+static void test_heart_tapped_offline_goes_out_on_connect_and_again_after_a_reconnect(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    run(3000, false);
+    tap(1);
+    TEST_ASSERT_EQUAL_INT(0, g_n_ups);  // no path yet: queued
+    wifi(true);
+    mqtt(true);
+    TEST_ASSERT_EQUAL_INT(1, g_n_ups);
+    uint64_t id = g_ups[0].id;
+    TEST_ASSERT_TRUE(g_ups[0].k == HB_MOOD_HEART && g_ups[0].path == HB_PATH_WIFI);
+    run(HB_ACK_MS + 100, false);  // no PUBACK: the other path (BLE, dropped by the M3 port), then parked
+    TEST_ASSERT_EQUAL_INT(2, g_n_ups);
+    TEST_ASSERT_TRUE(g_ups[1].id == id && g_ups[1].path == HB_PATH_BLE);
+    run(HB_ACK_MS + 100, false);
+    TEST_ASSERT_EQUAL_INT(2, g_n_ups);
+    mqtt(false);
+    run(HB_LINK_QUICK_MS, false);
+    wifi(true);
+    mqtt(true);  // reconnected: resent with the same id (the router dedupes on did + id)
+    TEST_ASSERT_EQUAL_INT(3, g_n_ups);
+    TEST_ASSERT_TRUE(g_ups[2].id == id && g_ups[2].path == HB_PATH_WIFI);
+    ack(id);
+    TEST_ASSERT_EQUAL_UINT8(0, core.n_out);
+}
+
+static void test_config_use_wifi_stops_and_restarts_the_link(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    wifi(true);
+    mqtt(true);
+    hb_cfg_t c = hb_cfg_default;
+    c.n = 2;
+    c.use_wifi = false;
+    hb_ev_t e = {.type = HB_EV_CFG, .cfg = &c};
+    step(&e);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+    TEST_ASSERT_EQUAL_INT(HB_ST_OFFLINE, act.state);
+    TEST_ASSERT_EQUAL_UINT32(2, core.cfg.n);
+    int n = g_n_links;
+    run(60000, false);
+    TEST_ASSERT_EQUAL_INT(n, g_n_links);  // stays off
+    c.use_wifi = true;
+    step(&e);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());
+
+    g_wifi = false;  // nothing provisioned: the link never starts
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    run(60000, false);
+    TEST_ASSERT_EQUAL_INT(0, g_n_links);
+}
+
+// ---- hb_wire: what goes on the wire ----------------------------------------------------------------
+
+#define EPOCH0 1795400000u  // 2026-11-23 06:33:20 UTC
+
+static const char *jstr(const cJSON *o, const char *k)
+{
+    const cJSON *j = cJSON_GetObjectItemCaseSensitive(o, k);
+    return cJSON_IsString(j) ? j->valuestring : "(none)";
+}
+
+static double jnum(const cJSON *o, const char *k)
+{
+    const cJSON *j = cJSON_GetObjectItemCaseSensitive(o, k);
+    return cJSON_IsNumber(j) ? j->valuedouble : -1;
+}
+
+static void connected(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = g_emit = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, EPOCH0);
+    wifi(true);
+    mqtt(true);
+}
+
+static void test_wire_connect_publishes_state_and_tele_then_a_tap_publishes_the_mood(void)
+{
+    connected();
+    TEST_ASSERT_EQUAL_INT(2, g_n_pubs);
+    TEST_ASSERT_EQUAL_STRING("hb/v1/d/HB-3FA2C1/state", g_pubs[0].topic);
+    TEST_ASSERT_TRUE(g_pubs[0].retain && !g_pubs[0].mood && g_pubs[0].path == HB_PATH_WIFI);
+    hb_msg_t m;
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(g_pubs[0].json, strlen(g_pubs[0].json), &m));
+    TEST_ASSERT_EQUAL_STRING("state", m.t);
+    TEST_ASSERT_EQUAL_STRING("away", jstr(m.root, "st"));
+    TEST_ASSERT_EQUAL_STRING("wifi", jstr(m.root, "path"));
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(m.root, "wake"));
+    TEST_ASSERT_EQUAL_UINT32(EPOCH0, m.ts);
+    hb_msg_free(&m);
+
+    TEST_ASSERT_EQUAL_STRING("hb/v1/d/HB-3FA2C1/up", g_pubs[1].topic);
+    TEST_ASSERT_FALSE(g_pubs[1].retain);
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(g_pubs[1].json, strlen(g_pubs[1].json), &m));
+    TEST_ASSERT_EQUAL_STRING("tele", m.t);
+    TEST_ASSERT_EQUAL_INT(3900, (int)jnum(m.root, "mv"));
+    TEST_ASSERT_EQUAL_INT(-61, (int)jnum(m.root, "rssi"));
+    TEST_ASSERT_EQUAL_INT(0, (int)jnum(m.root, "cfg"));
+    TEST_ASSERT_EQUAL_STRING("2.0.0-test", jstr(m.root, "fw"));
+    TEST_ASSERT_EQUAL_STRING("A", jstr(m.root, "hw"));
+    TEST_ASSERT_EQUAL_STRING("poweron", jstr(m.root, "rst"));
+    TEST_ASSERT_EQUAL_INT(1234, (int)jnum(m.root, "heap"));
+    TEST_ASSERT_TRUE(jnum(m.root, "pct") >= 0 && jnum(m.root, "up_s") >= 0);
+    hb_msg_free(&m);
+
+    run(3000, false);
+    tap(1);
+    TEST_ASSERT_EQUAL_INT(3, g_n_pubs);
+    TEST_ASSERT_TRUE(g_pubs[2].mood && !g_pubs[2].retain && g_pubs[2].id == g_ups[0].id);
+    TEST_ASSERT_EQUAL_STRING("hb/v1/d/HB-3FA2C1/up", g_pubs[2].topic);
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(g_pubs[2].json, strlen(g_pubs[2].json), &m));
+    char want[128], id[HB_ID_LEN + 1];
+    hb_id_format(g_ups[0].id, id);
+    snprintf(want, sizeof want, "{\"v\":1,\"t\":\"mood\",\"id\":\"%s\",\"ts\":%lu,\"k\":\"heart\"}", id,
+             (unsigned long)m.ts);
+    TEST_ASSERT_EQUAL_STRING(want, g_pubs[2].json);
+    TEST_ASSERT_UINT32_WITHIN(10, EPOCH0 + 5, m.ts);
+    hb_msg_free(&m);
+
+    char will[HB_MSG_MAX_BEACON + 1];
+    TEST_ASSERT_TRUE(hb_wire_will(&core, now, will, sizeof will) > 0);
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(will, strlen(will), &m));
+    TEST_ASSERT_EQUAL_STRING("state", m.t);
+    TEST_ASSERT_EQUAL_STRING("lost", jstr(m.root, "st"));
+    TEST_ASSERT_EQUAL_INT(5, cJSON_GetArraySize(m.root));  // v, t, id, ts, st
+    hb_msg_free(&m);
+}
+
+static hb_rx_t g_rx;
+
+static int rx(const char *topic, const char *json)
+{
+    int before = g_n_pubs;
+    hb_wire_rx(&core, &g_x, topic, json, strlen(json), now, &g_rx, cap, NULL);
+    if (g_rx.has_ev) {
+        step(&g_rx.ev);
+    }
+    return g_n_pubs - before;
+}
+
+static void test_wire_downlinks_become_events_and_replies(void)
+{
+    const char *down = "hb/v1/d/HB-3FA2C1/down";
+    connected();
+    run(5000, false);  // the boot battery bar is over
+    g_n_pubs = 0;
+
+    TEST_ASSERT_EQUAL_INT(1, rx(down, "{\"v\":1,\"t\":\"show\",\"id\":\"00000000000000aa\",\"ts\":0,\"k\":\"sorry\"}"));
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_SORRY, core.fx.kind);
+    char want[128];
+    snprintf(want, sizeof want, "{\"v\":1,\"t\":\"shown\",\"id\":\"00000000000000aa\",\"ts\":%lu}",
+             (unsigned long)hb_core_epoch(&core, now));
+    TEST_ASSERT_EQUAL_STRING(want, g_pubs[0].json);
+    TEST_ASSERT_FALSE(g_pubs[0].mood);
+
+    TEST_ASSERT_EQUAL_INT(0, rx(down, "{\"v\":1,\"t\":\"time\",\"id\":\"00000000000000ab\",\"ts\":1800000000,\"tz\":330}"));
+    TEST_ASSERT_EQUAL_UINT32(1800000000u, hb_core_epoch(&core, now));
+    TEST_ASSERT_EQUAL_INT(0, rx(down, "{\"v\":1,\"t\":\"time\",\"id\":\"00000000000000ac\",\"ts\":0,\"tz\":330}"));
+    TEST_ASSERT_EQUAL_UINT32(1800000000u, hb_core_epoch(&core, now));  // ts 0 carries no time
+
+    hb_msg_t m;
+    TEST_ASSERT_EQUAL_INT(1, rx(down, "{\"v\":1,\"t\":\"get\",\"id\":\"00000000000000ad\",\"ts\":0,\"what\":\"info\"}"));
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(g_pubs[1].json, strlen(g_pubs[1].json), &m));
+    TEST_ASSERT_EQUAL_STRING("resp", m.t);
+    TEST_ASSERT_EQUAL_STRING("00000000000000ad", jstr(m.root, "re"));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(m.root, "ok")));
+    const cJSON *d = cJSON_GetObjectItemCaseSensitive(m.root, "d");
+    TEST_ASSERT_EQUAL_STRING("HB-3FA2C1", jstr(d, "did"));
+    TEST_ASSERT_EQUAL_STRING("2.0.0-test", jstr(d, "fw"));
+    TEST_ASSERT_EQUAL_INT(1, (int)jnum(d, "pv"));
+    TEST_ASSERT_EQUAL_INT(1, (int)jnum(d, "min_pv"));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(d, "claimed")));
+    hb_msg_free(&m);
+
+    TEST_ASSERT_EQUAL_INT(1, rx(down, "{\"v\":1,\"t\":\"dance\",\"id\":\"00000000000000ae\",\"ts\":0}"));
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(g_pubs[2].json, strlen(g_pubs[2].json), &m));
+    TEST_ASSERT_EQUAL_STRING("resp", m.t);
+    TEST_ASSERT_EQUAL_STRING("00000000000000ae", jstr(m.root, "re"));
+    TEST_ASSERT_EQUAL_STRING("unknown_t", jstr(m.root, "err"));
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(m.root, "ok")));
+    hb_msg_free(&m);
+
+    TEST_ASSERT_EQUAL_INT(0, rx(down, "{\"v\":1,\"t\":\"dance\",\"id\":\"BAD\",\"ts\":0}"));  // fails 2.2: silent
+    TEST_ASSERT_EQUAL_INT(0, rx(down, "{"));
+    TEST_ASSERT_EQUAL_INT(0, rx("hb/v1/d/HB-000001/down",
+                                "{\"v\":1,\"t\":\"show\",\"id\":\"00000000000000af\",\"ts\":0,\"k\":\"heart\"}"));
+    TEST_ASSERT_EQUAL_INT(0, rx(down, "{\"v\":1,\"t\":\"show\",\"id\":\"00000000000000b0\",\"ts\":0,\"k\":\"hug\"}"));
+    TEST_ASSERT_EQUAL_INT(0, rx(down, "{\"v\":1,\"t\":\"sleep\",\"id\":\"00000000000000b1\",\"ts\":0,\"for_s\":-1}"));
+    TEST_ASSERT_EQUAL_INT(HB_ST_AWAY, act.state);
+
+    run(5000, false);
+    TEST_ASSERT_EQUAL_INT(1, rx(down, "{\"v\":1,\"t\":\"sleep\",\"id\":\"00000000000000b2\",\"ts\":0,\"for_s\":600}"));
+    TEST_ASSERT_EQUAL_INT(HB_ST_SLEEP, act.state);  // retained state before the deep sleep, with its wake time
+    TEST_ASSERT_EQUAL_STRING("hb/v1/d/HB-3FA2C1/state", g_pubs[3].topic);
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(g_pubs[3].json, strlen(g_pubs[3].json), &m));
+    TEST_ASSERT_EQUAL_STRING("sleep", jstr(m.root, "st"));
+    TEST_ASSERT_EQUAL_UINT32(hb_core_epoch(&core, now) + 600, (uint32_t)jnum(m.root, "wake"));
+    hb_msg_free(&m);
+    TEST_ASSERT_TRUE(run(1000, false));
+    TEST_ASSERT_EQUAL_UINT32(600, act.sleep_s);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -866,5 +1266,14 @@ int main(void)
     RUN_TEST(test_outbox_keeps_the_newest_four_with_distinct_ids);
     RUN_TEST(test_unacked_mood_survives_deep_sleep_and_goes_out_on_the_first_path);
     RUN_TEST(test_duplicate_show_answers_shown_without_replaying);
+    RUN_TEST(test_link_backoff_5s_15s_60s_5m_15m_then_30m_and_never_sleeps);
+    RUN_TEST(test_link_cached_ap_first_then_scan_at_once_then_mqtt);
+    RUN_TEST(test_link_drop_retries_after_1s_then_backs_off);
+    RUN_TEST(test_link_mqtt_without_connack_is_a_failed_round);
+    RUN_TEST(test_every_connect_reports_state_then_tele_every_tele_min);
+    RUN_TEST(test_heart_tapped_offline_goes_out_on_connect_and_again_after_a_reconnect);
+    RUN_TEST(test_config_use_wifi_stops_and_restarts_the_link);
+    RUN_TEST(test_wire_connect_publishes_state_and_tele_then_a_tap_publishes_the_mood);
+    RUN_TEST(test_wire_downlinks_become_events_and_replies);
     return UNITY_END();
 }

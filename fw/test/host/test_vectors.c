@@ -1,18 +1,45 @@
-// Golden vectors (protocol/vectors.json) against hb_msg, hb_frame, hb_cfg_default and the schedule. Config
-// parse and signature vectors join in M3 (hb_config, mbedTLS).
+// Golden vectors (protocol/vectors.json) against hb_msg, hb_frame, hb_config (parse, defaults, signature)
+// and the schedule; plus the files the firmware pins (fw/main/certs) parse.
 #include "unity.h"
 #include "hb_msg.h"
 #include "hb_frame.h"
 #include "hb_cfg.h"
+#include "hb_config.h"
 #include "hb_policy.h"
+#include "hb_wire.h"
+#include "mbedtls/pk.h"
+#include "mbedtls/oid.h"
+#include "mbedtls/x509_crt.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef HB_VECTORS_PATH
-#error "HB_VECTORS_PATH must be defined (fw/test/host/CMakeLists.txt)"
+#if !defined(HB_VECTORS_PATH) || !defined(HB_CERTS_PATH)
+#error "HB_VECTORS_PATH and HB_CERTS_PATH must be defined (fw/test/host/CMakeLists.txt)"
 #endif
+
+// Whole file plus a NUL (counted in *len, as mbedTLS wants for PEM); NULL if unreadable.
+static char *slurp(const char *path, size_t *len)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return NULL;
+    }
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *text = malloc((size_t)n + 1);
+    if (text && fread(text, 1, (size_t)n, f) == (size_t)n) {
+        text[n] = 0;
+        *len = (size_t)n + 1;
+    } else {
+        free(text);
+        text = NULL;
+    }
+    fclose(f);
+    return text;
+}
 
 static cJSON *g_vec;
 
@@ -276,28 +303,157 @@ static int hhmm(const char *s)
     return ((s[0] - '0') * 10 + (s[1] - '0')) * 60 + (s[3] - '0') * 10 + (s[4] - '0');
 }
 
+// hb_cfg_t in the vectors' JSON shape (test-side, so a parser mistake cannot hide behind its own printer).
+static cJSON *cfg_json(const hb_cfg_t *c)
+{
+    char days[8], hm[2][6];
+    for (int i = 0; i < 7; i++) {
+        days[i] = (char)('0' + ((c->days >> i) & 1));
+    }
+    days[7] = 0;
+    snprintf(hm[0], sizeof hm[0], "%02u:%02u", (unsigned)(c->start_min / 60) % 100, (unsigned)c->start_min % 60);
+    snprintf(hm[1], sizeof hm[1], "%02u:%02u", (unsigned)(c->stop_min / 60) % 100, (unsigned)c->stop_min % 60);
+    cJSON *j = cJSON_CreateObject(), *b;
+    cJSON_AddNumberToObject(j, "cv", 1);
+    cJSON_AddNumberToObject(j, "n", c->n);
+    cJSON_AddStringToObject(j, "did", c->did);
+    b = cJSON_AddObjectToObject(j, "srv");
+    cJSON *hosts = cJSON_AddArrayToObject(b, "hosts"), *ports = cJSON_AddArrayToObject(b, "mqtt");
+    for (int i = 0; i < c->n_hosts; i++) {
+        cJSON_AddItemToArray(hosts, cJSON_CreateString(c->hosts[i]));
+    }
+    for (int i = 0; i < c->n_mqtt; i++) {
+        cJSON_AddItemToArray(ports, cJSON_CreateNumber(c->mqtt[i]));
+    }
+    cJSON_AddNumberToObject(b, "api", c->api);
+    cJSON_AddStringToObject(j, "name", c->name);
+    cJSON_AddNumberToObject(cJSON_AddObjectToObject(j, "led"), "bright", c->bright);
+    b = cJSON_AddObjectToObject(j, "sched");
+    cJSON_AddBoolToObject(b, "on", c->sched_on);
+    cJSON_AddNumberToObject(b, "tz", c->tz_min);
+    cJSON_AddStringToObject(b, "days", days);
+    cJSON_AddStringToObject(b, "start", hm[0]);
+    cJSON_AddStringToObject(b, "stop", hm[1]);
+    b = cJSON_AddObjectToObject(j, "pwr");
+    cJSON_AddNumberToObject(b, "idle_nap_min", c->idle_nap_min);
+    cJSON_AddNumberToObject(b, "nap_wake_min", c->nap_wake_min);
+    cJSON_AddNumberToObject(b, "batt_low_mv", c->batt_low_mv);
+    cJSON_AddNumberToObject(b, "batt_off_mv", c->batt_off_mv);
+    cJSON_AddNumberToObject(b, "batt_cal_ppm", c->batt_cal_ppm);
+    b = cJSON_AddObjectToObject(j, "ble");
+    cJSON_AddNumberToObject(b, "adv_fast_ms", c->adv_fast_ms);
+    cJSON_AddNumberToObject(b, "adv_fast_s", c->adv_fast_s);
+    cJSON_AddNumberToObject(b, "adv_slow_ms", c->adv_slow_ms);
+    cJSON_AddNumberToObject(b, "conn_ms", c->conn_ms);
+    cJSON_AddNumberToObject(b, "latency", c->latency);
+    cJSON_AddNumberToObject(b, "sup_ms", c->sup_ms);
+    b = cJSON_AddObjectToObject(j, "net");
+    cJSON_AddBoolToObject(b, "use_wifi", c->use_wifi);
+    cJSON_AddNumberToObject(b, "near_hold_s", c->near_hold_s);
+    cJSON_AddNumberToObject(b, "away_grace_s", c->away_grace_s);
+    cJSON_AddNumberToObject(b, "tele_min", c->tele_min);
+    b = cJSON_AddObjectToObject(j, "fw");
+    cJSON_AddStringToObject(b, "ver", c->fw_ver);
+    cJSON_AddStringToObject(b, "path", c->fw_path);
+    cJSON_AddStringToObject(b, "sha256", c->fw_sha256);
+    cJSON_AddNumberToObject(b, "min_mv", c->fw_min_mv);
+    return j;
+}
+
+static void assert_cfg(const cJSON *want, const hb_cfg_t *got, const char *name)
+{
+    cJSON *j = cfg_json(got);
+    if (!cJSON_Compare(want, j, true)) {
+        char *a = cJSON_PrintUnformatted(want), *b = cJSON_PrintUnformatted(j);
+        printf("%s\n want %s\n  got %s\n", name, a, b);
+        cJSON_free(a);
+        cJSON_free(b);
+        TEST_FAIL_MESSAGE(name);
+    }
+    cJSON_Delete(j);
+}
+
 static void test_cfg_defaults_match_vectors(void)
 {
-    const cJSON *d = section("config", "defaults");
-    const cJSON *led = cJSON_GetObjectItemCaseSensitive(d, "led");
-    const cJSON *sched = cJSON_GetObjectItemCaseSensitive(d, "sched");
-    const cJSON *pwr = cJSON_GetObjectItemCaseSensitive(d, "pwr");
-    const hb_cfg_t *c = &hb_cfg_default;
-    TEST_ASSERT_EQUAL_INT(num(led, "bright"), c->bright);
-    TEST_ASSERT_EQUAL(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(sched, "on")), c->sched_on);
-    TEST_ASSERT_EQUAL_INT(num(sched, "tz"), c->tz_min);
-    uint8_t days = 0;
-    for (int i = 0; i < 7; i++) {
-        days |= (uint8_t)((str(sched, "days")[i] == '1') << i);
+    cJSON *want = cJSON_Duplicate(section("config", "defaults"), true);
+    cJSON_AddNumberToObject(want, "cv", 1);
+    cJSON_AddNumberToObject(want, "n", 0);
+    cJSON_AddStringToObject(want, "did", "");
+    assert_cfg(want, &hb_cfg_default, "defaults");
+    cJSON_Delete(want);
+    TEST_ASSERT_EQUAL_INT(HB_CFG_MAX, num(cJSON_GetObjectItemCaseSensitive(g_vec, "config"), "max_bytes"));
+}
+
+static void test_config_parse(void)
+{
+    const cJSON *v;
+    int n = 0;
+    cJSON_ArrayForEach(v, section("config", "parse")) {
+        const char *name = str(v, "name"), *json = str(v, "json"), *err = str(v, "err");
+        hb_cfg_t c;
+        const char *got = hb_config_parse(json, strlen(json), &c);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(err ? err : "(ok)", got ? got : "(ok)", name);
+        if (!got) {
+            assert_cfg(cJSON_GetObjectItemCaseSensitive(v, "cfg"), &c, name);
+        }
+        n++;
     }
-    TEST_ASSERT_EQUAL_HEX8(days, c->days);
-    TEST_ASSERT_EQUAL_INT(hhmm(str(sched, "start")), c->start_min);
-    TEST_ASSERT_EQUAL_INT(hhmm(str(sched, "stop")), c->stop_min);
-    TEST_ASSERT_EQUAL_INT(num(pwr, "idle_nap_min"), c->idle_nap_min);
-    TEST_ASSERT_EQUAL_INT(num(pwr, "nap_wake_min"), c->nap_wake_min);
-    TEST_ASSERT_EQUAL_INT(num(pwr, "batt_low_mv"), c->batt_low_mv);
-    TEST_ASSERT_EQUAL_INT(num(pwr, "batt_off_mv"), c->batt_off_mv);
-    TEST_ASSERT_EQUAL_INT(num(pwr, "batt_cal_ppm"), c->batt_cal_ppm);
+    TEST_ASSERT_TRUE(n >= 30);
+}
+
+static void test_config_signature(void)
+{
+    const cJSON *sig = section("config", "signature"), *v;
+    uint8_t key[128], msg[HB_CFG_MAX], s[80];
+    size_t klen = unhex(str(sig, "pub_spki_hex"), key);
+    int n = 0;
+    cJSON_ArrayForEach(v, cJSON_GetObjectItemCaseSensitive(sig, "verify")) {
+        const char *name = str(v, "name");
+        int mlen = hb_b64url_decode(str(v, "b"), msg, sizeof msg), slen = hb_b64url_decode(str(v, "s"), s, sizeof s);
+        TEST_ASSERT_TRUE_MESSAGE(mlen > 0 && slen > 0, name);
+        TEST_ASSERT_EQUAL_MESSAGE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(v, "ok")),
+                                  hb_config_verify(key, klen, msg, (size_t)mlen, s, (size_t)slen), name);
+        n++;
+    }
+    TEST_ASSERT_EQUAL_INT(3, n);
+}
+
+static void test_b64url(void)
+{
+    uint8_t out[8];
+    TEST_ASSERT_EQUAL_INT(0, hb_b64url_decode("", out, sizeof out));
+    TEST_ASSERT_EQUAL_INT(1, hb_b64url_decode("_w", out, sizeof out));
+    TEST_ASSERT_EQUAL_HEX8(0xff, out[0]);
+    TEST_ASSERT_EQUAL_INT(3, hb_b64url_decode("-_-_", out, sizeof out));
+    TEST_ASSERT_EQUAL_HEX8(0xfb, out[0]);
+    TEST_ASSERT_EQUAL_INT(-1, hb_b64url_decode("_w==", out, sizeof out));  // no padding
+    TEST_ASSERT_EQUAL_INT(-1, hb_b64url_decode("ab+/", out, sizeof out));  // standard alphabet
+    TEST_ASSERT_EQUAL_INT(-1, hb_b64url_decode("abcde", out, sizeof out)); // 1 char past a quad
+    TEST_ASSERT_EQUAL_INT(-1, hb_b64url_decode("AAAAAAAAAAAA", out, sizeof out));  // 9 bytes > 8
+}
+
+// The CA and config key the firmware embeds (fw/main/certs) parse as what mbedTLS will be handed.
+static void test_pinned_files_parse(void)
+{
+    size_t len;
+    char *pem = slurp(HB_CERTS_PATH "/cfg-sign.pub", &len);
+    TEST_ASSERT_NOT_NULL(pem);
+    mbedtls_pk_context pk;
+    mbedtls_pk_init(&pk);
+    TEST_ASSERT_EQUAL_INT(0, mbedtls_pk_parse_public_key(&pk, (const uint8_t *)pem, len));
+    TEST_ASSERT_TRUE(mbedtls_pk_can_do(&pk, MBEDTLS_PK_ECDSA));
+    TEST_ASSERT_EQUAL_size_t(256, mbedtls_pk_get_bitlen(&pk));
+    mbedtls_pk_free(&pk);
+    free(pem);
+
+    pem = slurp(HB_CERTS_PATH "/ca.crt", &len);
+    TEST_ASSERT_NOT_NULL(pem);
+    mbedtls_x509_crt crt;
+    mbedtls_x509_crt_init(&crt);
+    TEST_ASSERT_EQUAL_INT(0, mbedtls_x509_crt_parse(&crt, (const uint8_t *)pem, len));
+    TEST_ASSERT_TRUE(mbedtls_x509_crt_has_ext_type(&crt, MBEDTLS_X509_EXT_BASIC_CONSTRAINTS));
+    mbedtls_x509_crt_free(&crt);
+    free(pem);
 }
 
 static void test_schedule(void)
@@ -324,22 +480,74 @@ static void test_schedule(void)
     }
 }
 
+// The `cfg` handler (PROTOCOL.md 3: rejected if signature bad, did mismatch, or n <= stored) on the
+// signature vectors' key and bytes ({"cv":1,"n":1,"did":"HB-3FA2C1"}).
+static int g_cfg_pubs;
+static void no_pub(void *arg, const hb_pub_t *p)
+{
+    (void)arg;
+    (void)p;
+    g_cfg_pubs++;
+}
+
+static const char *cfg_rx(hb_core_t *c, hb_wire_ctx_t *x, const char *topic, int n, const char *b, const char *s,
+                          hb_rx_t *rx)
+{
+    char msg[HB_MSG_MAX + 1];
+    snprintf(msg, sizeof msg, "{\"v\":1,\"t\":\"cfg\",\"id\":\"0123456789abcdef\",\"ts\":0,\"n\":%d,\"b\":\"%s\",\"s\":\"%s\"}",
+             n, b, s);
+    hb_wire_rx(c, x, topic, msg, strlen(msg), 0, rx, no_pub, NULL);
+    TEST_ASSERT_TRUE(rx->has_ev == (rx->cfg_err == NULL));
+    return rx->cfg_err ? rx->cfg_err : "(ok)";
+}
+
+static void test_cfg_message_accepts_once_and_rejects_bad_sig_old_n_wrong_did(void)
+{
+    const cJSON *sig = section("config", "signature"), *v, *good = NULL, *other = NULL, *raw = NULL;
+    cJSON_ArrayForEach(v, cJSON_GetObjectItemCaseSensitive(sig, "verify")) {
+        const char *name = str(v, "name");
+        good = strcmp(name, "good") == 0 ? v : good;
+        other = strcmp(name, "other_bytes") == 0 ? v : other;
+        raw = strcmp(name, "raw_r_s_is_not_der") == 0 ? v : raw;
+    }
+    TEST_ASSERT_TRUE(good && other && raw);
+    static uint8_t key[128];
+    static hb_core_t c;
+    static hb_rx_t rx;
+    hb_wire_ctx_t x = {.did = "HB-3FA2C1", .fw = "t", .hw = "t", .rst = "t", .cfg_key = key,
+                       .cfg_key_len = unhex(str(sig, "pub_spki_hex"), key)};
+    const char *topic = "hb/v1/d/HB-3FA2C1/cfg";
+    memset(&c, 0, sizeof c);
+    c.cfg = hb_cfg_default;  // n 0: nothing accepted yet
+
+    TEST_ASSERT_EQUAL_STRING("sig", cfg_rx(&c, &x, topic, 2, str(other, "b"), str(other, "s"), &rx));
+    TEST_ASSERT_EQUAL_STRING("sig", cfg_rx(&c, &x, topic, 1, str(raw, "b"), str(raw, "s"), &rx));
+    TEST_ASSERT_EQUAL_STRING("body", cfg_rx(&c, &x, topic, 1, "not*b64", str(good, "s"), &rx));
+    TEST_ASSERT_EQUAL_STRING("n", cfg_rx(&c, &x, topic, 5, str(good, "b"), str(good, "s"), &rx));  // body n != cfg n
+    TEST_ASSERT_EQUAL_STRING("(ok)", cfg_rx(&c, &x, topic, 1, str(good, "b"), str(good, "s"), &rx));
+    TEST_ASSERT_EQUAL_INT(HB_EV_CFG, rx.ev.type);
+    TEST_ASSERT_EQUAL_UINT32(1, rx.ev.cfg->n);
+    TEST_ASSERT_EQUAL_STRING("HB-3FA2C1", rx.ev.cfg->did);
+    TEST_ASSERT_EQUAL_STRING("{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\"}", (const char *)rx.raw);  // b's bytes, to persist
+    TEST_ASSERT_EQUAL_size_t(strlen("{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\"}"), rx.raw_len);
+
+    c.cfg = *rx.ev.cfg;  // stored n = 1: the retained copy arriving again on the next connect is old
+    TEST_ASSERT_EQUAL_STRING("n", cfg_rx(&c, &x, topic, 1, str(good, "b"), str(good, "s"), &rx));
+
+    c.cfg = hb_cfg_default;
+    snprintf(x.did, sizeof x.did, "HB-000001");  // a config signed for another beacon
+    TEST_ASSERT_EQUAL_STRING("did", cfg_rx(&c, &x, "hb/v1/d/HB-000001/cfg", 1, str(good, "b"), str(good, "s"), &rx));
+    TEST_ASSERT_EQUAL_INT(0, g_cfg_pubs);  // a refused config is never answered
+}
+
 int main(void)
 {
-    FILE *f = fopen(HB_VECTORS_PATH, "rb");
-    if (!f) {
-        fprintf(stderr, "cannot open %s\n", HB_VECTORS_PATH);
+    size_t len;
+    char *text = slurp(HB_VECTORS_PATH, &len);
+    if (!text) {
+        fprintf(stderr, "cannot read %s\n", HB_VECTORS_PATH);
         return 1;
     }
-    fseek(f, 0, SEEK_END);
-    long n = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char *text = malloc((size_t)n + 1);
-    if (!text || fread(text, 1, (size_t)n, f) != (size_t)n) {
-        return 1;
-    }
-    text[n] = 0;
-    fclose(f);
     g_vec = cJSON_Parse(text);
     free(text);
     if (!g_vec) {
@@ -362,6 +570,11 @@ int main(void)
     RUN_TEST(test_reassemble_steps);
     RUN_TEST(test_cfg_defaults_match_vectors);
     RUN_TEST(test_schedule);
+    RUN_TEST(test_config_parse);
+    RUN_TEST(test_config_signature);
+    RUN_TEST(test_b64url);
+    RUN_TEST(test_pinned_files_parse);
+    RUN_TEST(test_cfg_message_accepts_once_and_rejects_bad_sig_old_n_wrong_did);
     int rc = UNITY_END();
     cJSON_Delete(g_vec);
     return rc;
