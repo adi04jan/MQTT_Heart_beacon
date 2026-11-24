@@ -2,14 +2,18 @@
 #include "unity.h"
 #include "hb_core.h"
 #include "hb_policy.h"
+#include "hb_wire.h"
+
+#include <stdio.h>
 
 #include <string.h>
 
 static bool g_wifi, g_cached;  // hb_boot_t.wifi / .ap_cached for the next boot()
+static bool g_emit;            // run every step's actions through hb_wire_emit into g_pubs
 
 void setUp(void)
 {
-    g_wifi = g_cached = false;
+    g_wifi = g_cached = g_emit = false;
 }
 void tearDown(void) {}
 
@@ -387,8 +391,36 @@ static struct {
 } g_links[64];  // every link command since boot()
 static int g_n_links, g_teles, g_reports;
 
+static struct {
+    char topic[HB_TOPIC_MAX];
+    char json[HB_MSG_MAX_BEACON + 1];
+    bool retain, mood;
+    hb_path_t path;
+    uint64_t id;
+} g_pubs[32];
+static int g_n_pubs;
+static const hb_wire_ctx_t g_x = {.did = "HB-3FA2C1", .fw = "2.0.0-test", .hw = "A", .rst = "poweron", .rssi = -61,
+                                  .heap = 1234};
+
+static void cap(void *arg, const hb_pub_t *p)
+{
+    (void)arg;
+    TEST_ASSERT_EQUAL_size_t(strlen(p->json), (size_t)p->len);
+    if (g_n_pubs < 32) {
+        snprintf(g_pubs[g_n_pubs].topic, HB_TOPIC_MAX, "%s", p->topic);
+        snprintf(g_pubs[g_n_pubs].json, sizeof g_pubs[0].json, "%s", p->json);
+        g_pubs[g_n_pubs].retain = p->retain;
+        g_pubs[g_n_pubs].mood = p->mood;
+        g_pubs[g_n_pubs].path = p->path;
+        g_pubs[g_n_pubs++].id = p->id;
+    }
+}
+
 static void rec(void)
 {
+    if (g_emit) {
+        hb_wire_emit(&core, &act, &g_x, now, cap, NULL);
+    }
     if (act.link && g_n_links < 64) {
         g_links[g_n_links].cmd = act.link;
         g_links[g_n_links++].t = now;
@@ -403,7 +435,7 @@ static void boot(hb_wake_t wake, bool claimed, bool pressed, uint32_t mv, uint32
     g_mv = mv;
     g_mood = HB_MOOD_NONE;
     g_n_ups = 0;
-    g_n_links = g_teles = g_reports = 0;
+    g_n_links = g_teles = g_reports = g_n_pubs = 0;
     hb_boot_t b = {.wake = wake, .claimed = claimed, .pressed = pressed, .mv = mv, .epoch = epoch, .seed = 42,
                    .wifi = g_wifi, .ap_cached = g_cached};
     hb_core_boot(&core, &g_cfg, &b, now, &act);
@@ -1044,6 +1076,157 @@ static void test_config_use_wifi_stops_and_restarts_the_link(void)
     TEST_ASSERT_EQUAL_INT(0, g_n_links);
 }
 
+// ---- hb_wire: what goes on the wire ----------------------------------------------------------------
+
+#define EPOCH0 1795400000u  // 2026-11-23 06:33:20 UTC
+
+static const char *jstr(const cJSON *o, const char *k)
+{
+    const cJSON *j = cJSON_GetObjectItemCaseSensitive(o, k);
+    return cJSON_IsString(j) ? j->valuestring : "(none)";
+}
+
+static double jnum(const cJSON *o, const char *k)
+{
+    const cJSON *j = cJSON_GetObjectItemCaseSensitive(o, k);
+    return cJSON_IsNumber(j) ? j->valuedouble : -1;
+}
+
+static void connected(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = g_emit = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, EPOCH0);
+    wifi(true);
+    mqtt(true);
+}
+
+static void test_wire_connect_publishes_state_and_tele_then_a_tap_publishes_the_mood(void)
+{
+    connected();
+    TEST_ASSERT_EQUAL_INT(2, g_n_pubs);
+    TEST_ASSERT_EQUAL_STRING("hb/v1/d/HB-3FA2C1/state", g_pubs[0].topic);
+    TEST_ASSERT_TRUE(g_pubs[0].retain && !g_pubs[0].mood && g_pubs[0].path == HB_PATH_WIFI);
+    hb_msg_t m;
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(g_pubs[0].json, strlen(g_pubs[0].json), &m));
+    TEST_ASSERT_EQUAL_STRING("state", m.t);
+    TEST_ASSERT_EQUAL_STRING("away", jstr(m.root, "st"));
+    TEST_ASSERT_EQUAL_STRING("wifi", jstr(m.root, "path"));
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(m.root, "wake"));
+    TEST_ASSERT_EQUAL_UINT32(EPOCH0, m.ts);
+    hb_msg_free(&m);
+
+    TEST_ASSERT_EQUAL_STRING("hb/v1/d/HB-3FA2C1/up", g_pubs[1].topic);
+    TEST_ASSERT_FALSE(g_pubs[1].retain);
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(g_pubs[1].json, strlen(g_pubs[1].json), &m));
+    TEST_ASSERT_EQUAL_STRING("tele", m.t);
+    TEST_ASSERT_EQUAL_INT(3900, (int)jnum(m.root, "mv"));
+    TEST_ASSERT_EQUAL_INT(-61, (int)jnum(m.root, "rssi"));
+    TEST_ASSERT_EQUAL_INT(0, (int)jnum(m.root, "cfg"));
+    TEST_ASSERT_EQUAL_STRING("2.0.0-test", jstr(m.root, "fw"));
+    TEST_ASSERT_EQUAL_STRING("A", jstr(m.root, "hw"));
+    TEST_ASSERT_EQUAL_STRING("poweron", jstr(m.root, "rst"));
+    TEST_ASSERT_EQUAL_INT(1234, (int)jnum(m.root, "heap"));
+    TEST_ASSERT_TRUE(jnum(m.root, "pct") >= 0 && jnum(m.root, "up_s") >= 0);
+    hb_msg_free(&m);
+
+    run(3000, false);
+    tap(1);
+    TEST_ASSERT_EQUAL_INT(3, g_n_pubs);
+    TEST_ASSERT_TRUE(g_pubs[2].mood && !g_pubs[2].retain && g_pubs[2].id == g_ups[0].id);
+    TEST_ASSERT_EQUAL_STRING("hb/v1/d/HB-3FA2C1/up", g_pubs[2].topic);
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(g_pubs[2].json, strlen(g_pubs[2].json), &m));
+    char want[128], id[HB_ID_LEN + 1];
+    hb_id_format(g_ups[0].id, id);
+    snprintf(want, sizeof want, "{\"v\":1,\"t\":\"mood\",\"id\":\"%s\",\"ts\":%lu,\"k\":\"heart\"}", id,
+             (unsigned long)m.ts);
+    TEST_ASSERT_EQUAL_STRING(want, g_pubs[2].json);
+    TEST_ASSERT_UINT32_WITHIN(10, EPOCH0 + 5, m.ts);
+    hb_msg_free(&m);
+
+    char will[HB_MSG_MAX_BEACON + 1];
+    TEST_ASSERT_TRUE(hb_wire_will(&core, now, will, sizeof will) > 0);
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(will, strlen(will), &m));
+    TEST_ASSERT_EQUAL_STRING("state", m.t);
+    TEST_ASSERT_EQUAL_STRING("lost", jstr(m.root, "st"));
+    TEST_ASSERT_EQUAL_INT(5, cJSON_GetArraySize(m.root));  // v, t, id, ts, st
+    hb_msg_free(&m);
+}
+
+static hb_rx_t g_rx;
+
+static int rx(const char *topic, const char *json)
+{
+    int before = g_n_pubs;
+    hb_wire_rx(&core, &g_x, topic, json, strlen(json), now, &g_rx, cap, NULL);
+    if (g_rx.has_ev) {
+        step(&g_rx.ev);
+    }
+    return g_n_pubs - before;
+}
+
+static void test_wire_downlinks_become_events_and_replies(void)
+{
+    const char *down = "hb/v1/d/HB-3FA2C1/down";
+    connected();
+    run(5000, false);  // the boot battery bar is over
+    g_n_pubs = 0;
+
+    TEST_ASSERT_EQUAL_INT(1, rx(down, "{\"v\":1,\"t\":\"show\",\"id\":\"00000000000000aa\",\"ts\":0,\"k\":\"sorry\"}"));
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_SORRY, core.fx.kind);
+    char want[128];
+    snprintf(want, sizeof want, "{\"v\":1,\"t\":\"shown\",\"id\":\"00000000000000aa\",\"ts\":%lu}",
+             (unsigned long)hb_core_epoch(&core, now));
+    TEST_ASSERT_EQUAL_STRING(want, g_pubs[0].json);
+    TEST_ASSERT_FALSE(g_pubs[0].mood);
+
+    TEST_ASSERT_EQUAL_INT(0, rx(down, "{\"v\":1,\"t\":\"time\",\"id\":\"00000000000000ab\",\"ts\":1800000000,\"tz\":330}"));
+    TEST_ASSERT_EQUAL_UINT32(1800000000u, hb_core_epoch(&core, now));
+    TEST_ASSERT_EQUAL_INT(0, rx(down, "{\"v\":1,\"t\":\"time\",\"id\":\"00000000000000ac\",\"ts\":0,\"tz\":330}"));
+    TEST_ASSERT_EQUAL_UINT32(1800000000u, hb_core_epoch(&core, now));  // ts 0 carries no time
+
+    hb_msg_t m;
+    TEST_ASSERT_EQUAL_INT(1, rx(down, "{\"v\":1,\"t\":\"get\",\"id\":\"00000000000000ad\",\"ts\":0,\"what\":\"info\"}"));
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(g_pubs[1].json, strlen(g_pubs[1].json), &m));
+    TEST_ASSERT_EQUAL_STRING("resp", m.t);
+    TEST_ASSERT_EQUAL_STRING("00000000000000ad", jstr(m.root, "re"));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(m.root, "ok")));
+    const cJSON *d = cJSON_GetObjectItemCaseSensitive(m.root, "d");
+    TEST_ASSERT_EQUAL_STRING("HB-3FA2C1", jstr(d, "did"));
+    TEST_ASSERT_EQUAL_STRING("2.0.0-test", jstr(d, "fw"));
+    TEST_ASSERT_EQUAL_INT(1, (int)jnum(d, "pv"));
+    TEST_ASSERT_EQUAL_INT(1, (int)jnum(d, "min_pv"));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(d, "claimed")));
+    hb_msg_free(&m);
+
+    TEST_ASSERT_EQUAL_INT(1, rx(down, "{\"v\":1,\"t\":\"dance\",\"id\":\"00000000000000ae\",\"ts\":0}"));
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(g_pubs[2].json, strlen(g_pubs[2].json), &m));
+    TEST_ASSERT_EQUAL_STRING("resp", m.t);
+    TEST_ASSERT_EQUAL_STRING("00000000000000ae", jstr(m.root, "re"));
+    TEST_ASSERT_EQUAL_STRING("unknown_t", jstr(m.root, "err"));
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(m.root, "ok")));
+    hb_msg_free(&m);
+
+    TEST_ASSERT_EQUAL_INT(0, rx(down, "{\"v\":1,\"t\":\"dance\",\"id\":\"BAD\",\"ts\":0}"));  // fails 2.2: silent
+    TEST_ASSERT_EQUAL_INT(0, rx(down, "{"));
+    TEST_ASSERT_EQUAL_INT(0, rx("hb/v1/d/HB-000001/down",
+                                "{\"v\":1,\"t\":\"show\",\"id\":\"00000000000000af\",\"ts\":0,\"k\":\"heart\"}"));
+    TEST_ASSERT_EQUAL_INT(0, rx(down, "{\"v\":1,\"t\":\"show\",\"id\":\"00000000000000b0\",\"ts\":0,\"k\":\"hug\"}"));
+    TEST_ASSERT_EQUAL_INT(0, rx(down, "{\"v\":1,\"t\":\"sleep\",\"id\":\"00000000000000b1\",\"ts\":0,\"for_s\":-1}"));
+    TEST_ASSERT_EQUAL_INT(HB_ST_AWAY, act.state);
+
+    run(5000, false);
+    TEST_ASSERT_EQUAL_INT(1, rx(down, "{\"v\":1,\"t\":\"sleep\",\"id\":\"00000000000000b2\",\"ts\":0,\"for_s\":600}"));
+    TEST_ASSERT_EQUAL_INT(HB_ST_SLEEP, act.state);  // retained state before the deep sleep, with its wake time
+    TEST_ASSERT_EQUAL_STRING("hb/v1/d/HB-3FA2C1/state", g_pubs[3].topic);
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(g_pubs[3].json, strlen(g_pubs[3].json), &m));
+    TEST_ASSERT_EQUAL_STRING("sleep", jstr(m.root, "st"));
+    TEST_ASSERT_EQUAL_UINT32(hb_core_epoch(&core, now) + 600, (uint32_t)jnum(m.root, "wake"));
+    hb_msg_free(&m);
+    TEST_ASSERT_TRUE(run(1000, false));
+    TEST_ASSERT_EQUAL_UINT32(600, act.sleep_s);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1090,5 +1273,7 @@ int main(void)
     RUN_TEST(test_every_connect_reports_state_then_tele_every_tele_min);
     RUN_TEST(test_heart_tapped_offline_goes_out_on_connect_and_again_after_a_reconnect);
     RUN_TEST(test_config_use_wifi_stops_and_restarts_the_link);
+    RUN_TEST(test_wire_connect_publishes_state_and_tele_then_a_tap_publishes_the_mood);
+    RUN_TEST(test_wire_downlinks_become_events_and_replies);
     return UNITY_END();
 }

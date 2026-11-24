@@ -6,6 +6,7 @@
 #include "hb_cfg.h"
 #include "hb_config.h"
 #include "hb_policy.h"
+#include "hb_wire.h"
 #include "mbedtls/pk.h"
 #include "mbedtls/oid.h"
 #include "mbedtls/x509_crt.h"
@@ -479,6 +480,66 @@ static void test_schedule(void)
     }
 }
 
+// The `cfg` handler (PROTOCOL.md 3: rejected if signature bad, did mismatch, or n <= stored) on the
+// signature vectors' key and bytes ({"cv":1,"n":1,"did":"HB-3FA2C1"}).
+static int g_cfg_pubs;
+static void no_pub(void *arg, const hb_pub_t *p)
+{
+    (void)arg;
+    (void)p;
+    g_cfg_pubs++;
+}
+
+static const char *cfg_rx(hb_core_t *c, hb_wire_ctx_t *x, const char *topic, int n, const char *b, const char *s,
+                          hb_rx_t *rx)
+{
+    char msg[HB_MSG_MAX + 1];
+    snprintf(msg, sizeof msg, "{\"v\":1,\"t\":\"cfg\",\"id\":\"0123456789abcdef\",\"ts\":0,\"n\":%d,\"b\":\"%s\",\"s\":\"%s\"}",
+             n, b, s);
+    hb_wire_rx(c, x, topic, msg, strlen(msg), 0, rx, no_pub, NULL);
+    TEST_ASSERT_TRUE(rx->has_ev == (rx->cfg_err == NULL));
+    return rx->cfg_err ? rx->cfg_err : "(ok)";
+}
+
+static void test_cfg_message_accepts_once_and_rejects_bad_sig_old_n_wrong_did(void)
+{
+    const cJSON *sig = section("config", "signature"), *v, *good = NULL, *other = NULL, *raw = NULL;
+    cJSON_ArrayForEach(v, cJSON_GetObjectItemCaseSensitive(sig, "verify")) {
+        const char *name = str(v, "name");
+        good = strcmp(name, "good") == 0 ? v : good;
+        other = strcmp(name, "other_bytes") == 0 ? v : other;
+        raw = strcmp(name, "raw_r_s_is_not_der") == 0 ? v : raw;
+    }
+    TEST_ASSERT_TRUE(good && other && raw);
+    static uint8_t key[128];
+    static hb_core_t c;
+    static hb_rx_t rx;
+    hb_wire_ctx_t x = {.did = "HB-3FA2C1", .fw = "t", .hw = "t", .rst = "t", .cfg_key = key,
+                       .cfg_key_len = unhex(str(sig, "pub_spki_hex"), key)};
+    const char *topic = "hb/v1/d/HB-3FA2C1/cfg";
+    memset(&c, 0, sizeof c);
+    c.cfg = hb_cfg_default;  // n 0: nothing accepted yet
+
+    TEST_ASSERT_EQUAL_STRING("sig", cfg_rx(&c, &x, topic, 2, str(other, "b"), str(other, "s"), &rx));
+    TEST_ASSERT_EQUAL_STRING("sig", cfg_rx(&c, &x, topic, 1, str(raw, "b"), str(raw, "s"), &rx));
+    TEST_ASSERT_EQUAL_STRING("body", cfg_rx(&c, &x, topic, 1, "not*b64", str(good, "s"), &rx));
+    TEST_ASSERT_EQUAL_STRING("n", cfg_rx(&c, &x, topic, 5, str(good, "b"), str(good, "s"), &rx));  // body n != cfg n
+    TEST_ASSERT_EQUAL_STRING("(ok)", cfg_rx(&c, &x, topic, 1, str(good, "b"), str(good, "s"), &rx));
+    TEST_ASSERT_EQUAL_INT(HB_EV_CFG, rx.ev.type);
+    TEST_ASSERT_EQUAL_UINT32(1, rx.ev.cfg->n);
+    TEST_ASSERT_EQUAL_STRING("HB-3FA2C1", rx.ev.cfg->did);
+    TEST_ASSERT_EQUAL_STRING("{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\"}", (const char *)rx.raw);  // b's bytes, to persist
+    TEST_ASSERT_EQUAL_size_t(strlen("{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\"}"), rx.raw_len);
+
+    c.cfg = *rx.ev.cfg;  // stored n = 1: the retained copy arriving again on the next connect is old
+    TEST_ASSERT_EQUAL_STRING("n", cfg_rx(&c, &x, topic, 1, str(good, "b"), str(good, "s"), &rx));
+
+    c.cfg = hb_cfg_default;
+    snprintf(x.did, sizeof x.did, "HB-000001");  // a config signed for another beacon
+    TEST_ASSERT_EQUAL_STRING("did", cfg_rx(&c, &x, "hb/v1/d/HB-000001/cfg", 1, str(good, "b"), str(good, "s"), &rx));
+    TEST_ASSERT_EQUAL_INT(0, g_cfg_pubs);  // a refused config is never answered
+}
+
 int main(void)
 {
     size_t len;
@@ -513,6 +574,7 @@ int main(void)
     RUN_TEST(test_config_signature);
     RUN_TEST(test_b64url);
     RUN_TEST(test_pinned_files_parse);
+    RUN_TEST(test_cfg_message_accepts_once_and_rejects_bad_sig_old_n_wrong_did);
     int rc = UNITY_END();
     cJSON_Delete(g_vec);
     return rc;

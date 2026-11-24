@@ -40,7 +40,7 @@ target_include_directories(cjson PUBLIC vendor/cjson)
 
 add_library(hb_core STATIC "${HB_CORE}/hb_msg.c" "${HB_CORE}/hb_frame.c" "${HB_CORE}/hb_button.c"
             "${HB_CORE}/hb_fx.c" "${HB_CORE}/hb_batt.c" "${HB_CORE}/hb_policy.c" "${HB_CORE}/hb_core.c"
-            "${HB_CORE}/hb_config.c" "${HB_CORE}/hb_link.c")
+            "${HB_CORE}/hb_config.c" "${HB_CORE}/hb_link.c" "${HB_CORE}/hb_wire.c")
 target_include_directories(hb_core PUBLIC "${HB_CORE}")
 target_link_libraries(hb_core PUBLIC cjson mbedcrypto_host)
 target_compile_options(hb_core PRIVATE -Wall -Wextra -Werror)
