@@ -66,6 +66,23 @@ preflight() {
   [ -z "$busy" ] || die "port(s)$busy already in use; hb needs $PORTS (1883 stays the shared broker's)"
 }
 
+# <uid> <path>...: refuses a symlink at any of the paths, or an existing one not owned by <uid>. Root writes into
+# these; a compromised hb account must not steer those writes (or a chown) with a planted link.
+check_paths() {
+  local want=$1 p
+  shift
+  for p in "$@"; do [ ! -L "$p" ] || die "$p is a symlink: root will not write through it"; done
+  for p in "$@"; do [ ! -e "$p" ] || [ "$(stat -c %u -- "$p")" = "$want" ] || die "$p is not owned by uid $want"; done
+}
+
+# Everything root writes or chowns: root-owned trees ($ETC is root:hb 0750, its files root:hb 0640, so hb can read
+# but not plant), and the only hb-owned paths root touches ($VAR, $MQVAR, router.pass).
+safe_paths() {
+  check_paths 0 $OPT $MQ $ETC "$PKI" $MQ/mosquitto-hb.conf $MQ/acl $UNITS/hb-mosquitto.service \
+    $UNITS/hb-server.service $ETC/{ca.crt,leaf.crt,leaf.key,cfg-sign.key,cfg-sign.pub,hb-server.env}
+  check_paths "$(id -u hb 2>/dev/null || echo none)" $VAR $MQVAR $VAR/router.pass
+}
+
 # Installed leaf chains to the installed CA, carries IP SAN $1 and is good for 30 more days.
 leaf_ok() {
   [ -f $ETC/leaf.key ] && openssl verify -CAfile $ETC/ca.crt $ETC/leaf.crt >/dev/null 2>&1 &&
@@ -79,7 +96,7 @@ plan() {
   if ! id hb >/dev/null 2>&1; then
     run "useradd --system --user-group --home-dir $VAR --no-create-home --shell /usr/sbin/nologin hb"
   fi
-  run "install -d -m 755 $OPT $MQ && install -d -o hb -g hb -m 700 $ETC $VAR $VAR/fw $MQVAR"
+  run "install -d -m 755 $OPT $MQ && install -d -o root -g hb -m 750 $ETC && install -d -o hb -g hb -m 700 $VAR $MQVAR"
   # code: server/ and deploy/ from this checkout
   if [ "$SRC" != "$OPT" ]; then
     run "tar -C $SRC --exclude=.venv --exclude=__pycache__ --exclude=.pytest_cache -cf - server deploy | tar -C $OPT --no-same-owner -xf -"
@@ -103,18 +120,19 @@ plan() {
       run "install -m 600 $ETC/cfg-sign.key $PKI/" # mkca.sh keeps an existing key
     fi
     run "sh $OPT/deploy/mkca.sh $ip $PKI"
-    run "install -o hb -g hb -m 644 $PKI/ca.crt $PKI/leaf.crt $PKI/cfg-sign.pub $ETC/ && install -o hb -g hb -m 600 $PKI/leaf.key $ETC/"
+    run "install -o root -g hb -m 640 $PKI/ca.crt $PKI/leaf.crt $PKI/leaf.key $PKI/cfg-sign.pub $ETC/"
     if [ ! -f $ETC/cfg-sign.key ]; then
-      run "install -o hb -g hb -m 600 $PKI/cfg-sign.key $ETC/"
+      run "install -o root -g hb -m 640 $PKI/cfg-sign.key $ETC/"
     fi
   fi
-  # router's broker password (the server hashes it into the password file)
-  if [ ! -f $VAR/router.pass ]; then
-    run "umask 077 && openssl rand -hex 32 > $VAR/router.pass && chown hb:hb $VAR/router.pass"
+  # router's broker password (the server hashes it into the password file). hb owns it, so it is made in a
+  # root-only temp dir and installed fresh: never written through whatever sits at the target.
+  if [ ! -e $VAR/router.pass ]; then
+    run "t=\$(mktemp -d) && openssl rand -hex 32 > \$t/p && rm -f $VAR/router.pass && install -o hb -g hb -m 600 \$t/p $VAR/router.pass && rm -r \$t"
   fi
   # broker config, server settings, units
   run "install -m 644 $OPT/deploy/mosquitto-hb.conf $OPT/deploy/acl $MQ/"
-  run "sed 's/^HB_HOSTS=.*/HB_HOSTS=$ip/' $OPT/deploy/hb-server.env > $ETC/hb-server.env && chmod 644 $ETC/hb-server.env"
+  run "sed 's/^HB_HOSTS=.*/HB_HOSTS=$ip/' $OPT/deploy/hb-server.env > $ETC/hb-server.env && chown -h root:hb $ETC/hb-server.env && chmod 640 $ETC/hb-server.env"
   run "install -m 644 $OPT/deploy/hb-mosquitto.service $OPT/deploy/hb-server.service $UNITS/"
   run "systemctl daemon-reload && systemctl enable hb-mosquitto hb-server && systemctl restart hb-mosquitto hb-server"
 }
@@ -126,6 +144,7 @@ main() {
   done
   need
   preflight "$ip"
+  safe_paths
   if [ "$APPLY" = 1 ] && [ "$(id -u)" != 0 ]; then die "--apply needs root: sudo bash $0 --apply $ip"; fi
   mode=$APPLY
   APPLY=0

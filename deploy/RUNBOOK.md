@@ -128,8 +128,9 @@ sudo ss -ltnp | grep -E ':(8883|8443|8444|1884) '
 sudo openssl x509 -in /etc/hb/leaf.crt -noout -enddate
 ```
 
-Secrets live in `/etc/hb` (TLS and config-signing keys), `/var/lib/hb/router.pass` and `/var/lib/hb/hb.db`; all
-are owned by `hb`, mode 600 or in 700 directories.
+Secrets live in `/etc/hb` (TLS and config-signing keys: `root:hb`, dir 0750, files 0640, so `hb` reads but cannot
+replace them), `/var/lib/hb/router.pass` and `/var/lib/hb/hb.db` (`hb`, 0600 in a 0700 dir). `install.sh` refuses
+if anything it writes as root is a symlink or not owned as expected.
 
 ## Local proof without the server
 

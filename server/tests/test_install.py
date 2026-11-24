@@ -78,7 +78,8 @@ def test_dry_run_prints_the_whole_plan_and_runs_nothing():
     acts = [ln[2:] for ln in out.splitlines() if ln.startswith("+ ")]
     assert "# dry run" in out and len(acts) >= 12
     for want in ("useradd --system", "/install.sh | env UV_UNMANAGED_INSTALL=/opt/hb/bin sh", "uv venv --python 3.12",
-                 f"mkca.sh {IP} /root/hb-pki", "openssl rand -hex 32 > /var/lib/hb/router.pass",
+                 f"mkca.sh {IP} /root/hb-pki", "install -o hb -g hb -m 600 $t/p /var/lib/hb/router.pass",
+                 "install -d -o root -g hb -m 750 /etc/hb", "install -o root -g hb -m 640 /root/hb-pki/ca.crt",
                  f"s/^HB_HOSTS=.*/HB_HOSTS={IP}/", "systemctl enable hb-mosquitto hb-server"):
         assert any(want in a for a in acts), want
     assert not any(re.search(r"/etc/mosquitto(?![-\w.])|(?<![-\w])mosquitto\.service", a) for a in acts)
@@ -88,6 +89,23 @@ def test_a_plan_touching_the_shared_broker_is_refused_before_anything_runs():
     rc, out = sh(f"run() {{ if shared \"$1\"; then die \"touches the shared broker: $1\"; fi; echo \"RAN $1\"; }}\n"
                  f"main {IP}", pre="HB_PKI=/etc/mosquitto/pki")  # the CA dir pointed into the shared broker
     assert rc == 1 and "REFUSED: touches the shared broker" in out and "RAN" not in out, out
+
+
+PREFIX = 'r=$(mktemp -d)\ntrap \'rm -rf "$r"\' EXIT\n'  # a temp root prefix, removed however the script exits
+
+
+def test_a_symlink_planted_where_root_writes_is_refused():
+    rc, out = sh(PREFIX + "VAR=$r/var/lib/hb\nmkdir -p $VAR\nln -s /etc/passwd $VAR/router.pass 2>/dev/null || true\n"
+                 "[ -L $VAR/router.pass ] || { echo NOSYMLINK; exit 0; }\n"
+                 f"run() {{ echo \"RAN $1\"; }}\nmain {IP}")
+    if "NOSYMLINK" in out:
+        pytest.skip("this bash cannot make symlinks (Git Bash without native links); runs in WSL / Linux")
+    assert rc == 1 and "router.pass is a symlink" in out and "RAN" not in out, out
+
+
+def test_a_root_tree_not_owned_by_root_is_refused():
+    rc, out = sh(PREFIX + f"ETC=$r/etc/hb\nmkdir -p $ETC\nrun() {{ echo \"RAN $1\"; }}\nmain {IP}")
+    assert rc == 1 and "/etc/hb is not owned by uid 0" in out and "RAN" not in out, out
 
 
 def test_apply_needs_root():
