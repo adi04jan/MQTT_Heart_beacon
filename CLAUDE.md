@@ -210,8 +210,8 @@ the API (8443), admin (127.0.0.1:8444) and the router.
 Deployed 2026-11-24 from `2d20277` (`deploy/RUNBOOK.md`). Server access from this PC: ssh alias `Home_Main_Server`
 (key auth, passwordless `sudo -n`); the source tree it was installed from is `~/hb-src` there (re-run
 `install.sh --apply <IP>` from a fresh `git archive HEAD server deploy` to update). The CA private key lives only on
-the dev PC in `%USERPROFILE%\hb-pki-backup` with the smoke users' passwords. Still to do: router forwards 8883/8443,
-`age` for encrypted backups, real users and beacons. The `health_dash` session knows the box (other services,
+the dev PC in `%USERPROFILE%\hb-pki-backup` with the smoke users' passwords. Router forwards 8883/8443 are live
+(smoke.py passes from the office). Still to do: `age` for encrypted backups, real users and beacons. The `health_dash` session knows the box (other services,
 cron, pump rules); leave the shared `mosquitto`, `telegram_heart` and `mqtt-payload-log` alone.
 
 ## Bridge service (server)
