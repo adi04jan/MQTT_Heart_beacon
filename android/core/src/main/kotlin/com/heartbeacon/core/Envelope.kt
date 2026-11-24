@@ -23,6 +23,10 @@ object Envelope {
         "claim", "wifi.scan", "wifi.list", "wifi.set", "wifi.forget", "wifi.use", "link", "relay", "reset",
     )
 
+    /** `state.st` values, exact and lowercase (PROTOCOL.md 3); [LWT_STATE] only as the broker's will. */
+    val STATES = listOf("pairing", "near", "away", "offline", "nap", "sleep", "lowbatt")
+    const val LWT_STATE = "lost"
+
     private val HEADER = setOf("v", "t", "id", "ts")
     private val ID = Regex("[0-9a-f]{16}")
 

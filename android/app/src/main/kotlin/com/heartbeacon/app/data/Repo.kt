@@ -1,5 +1,6 @@
 package com.heartbeacon.app.data
 
+import com.heartbeacon.core.Envelope
 import kotlinx.coroutines.flow.StateFlow
 
 enum class Mood(val wire: String) { HEART("heart"), SORRY("sorry"), ANNOY("annoy") }
@@ -10,6 +11,17 @@ sealed interface Presence {
     data object AwayWifi : Presence
     data class Asleep(val untilEpochMs: Long?) : Presence
     data object Offline : Presence
+
+    companion object {
+        /** The card line for a beacon `state` (exact lowercase `st`, PROTOCOL.md 3); null for anything else. */
+        fun of(st: String, wakeEpochS: Long): Presence? = when (st) {
+            "near" -> Near
+            "away" -> AwayWifi
+            "nap", "sleep", "lowbatt" -> Asleep(if (wakeEpochS > 0) wakeEpochS * 1000 else null)
+            "offline", "pairing", Envelope.LWT_STATE -> Offline
+            else -> null
+        }
+    }
 }
 
 data class Beacon(

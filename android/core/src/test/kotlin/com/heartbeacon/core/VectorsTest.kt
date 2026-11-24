@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.long
 import org.junit.Assert.assertArrayEquals
@@ -14,6 +15,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.fail
 import org.junit.Test
+import java.security.KeyFactory
+import java.security.Signature
+import java.security.SignatureException
+import java.security.spec.X509EncodedKeySpec
+import java.util.Base64
 
 /** protocol/vectors.json (on the test classpath, see core/build.gradle.kts) against the codec. */
 class VectorsTest {
@@ -28,6 +34,40 @@ class VectorsTest {
 
     @Test fun knownTypes() {
         assertEquals(vec["envelope"]!!.jsonObject["types"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet(), Envelope.TYPES)
+    }
+
+    @Test fun stateNames() {
+        val env = vec["envelope"]!!.jsonObject
+        assertEquals(env["states"]!!.jsonArray.map { it.jsonPrimitive.content }, Envelope.STATES)
+        assertEquals(env.s("lwt_state"), Envelope.LWT_STATE)
+    }
+
+    /** The phone is not a beacon encoder: it checks the 1024 B limit (`relay_of_896_fits` is its headroom). */
+    @Test fun sizeLimits() = list("envelope", "size").forEach { v ->
+        val name = v.s("name")
+        val enc = runCatching { Envelope.encode(v.s("t"), v.s("id"), v["ts"]!!.jsonPrimitive.long, v["body"]!!.jsonObject) }
+        assertEquals(name, v["ok"]!!.jsonPrimitive.boolean, enc.isSuccess)
+        if (enc.isSuccess) assertEquals(name, v["bytes"]!!.jsonPrimitive.int, enc.getOrThrow().size)
+        else assertEquals(name, "too_big", (enc.exceptionOrNull() as ProtocolException).code)
+    }
+
+    /** The documented config signature (PROTOCOL.md 7.1) read by a second, independent implementation (JCA). */
+    @Test fun configSignature() {
+        val sig = vec["config"]!!.jsonObject["signature"]!!.jsonObject
+        val pub = KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(unhex(sig.s("pub_spki_hex"))))
+        val b64u = Base64.getUrlDecoder()
+        sig["verify"]!!.jsonArray.map { it.jsonObject }.forEach { v ->
+            val ok = try {
+                Signature.getInstance("SHA256withECDSA").run {
+                    initVerify(pub)
+                    update(b64u.decode(v.s("b")))
+                    verify(b64u.decode(v.s("s")))
+                }
+            } catch (e: SignatureException) {
+                false // not DER
+            }
+            assertEquals(v.s("name"), v["ok"]!!.jsonPrimitive.boolean, ok)
+        }
     }
 
     @Test fun encodeAndRoundTrip() = list("envelope", "encode").forEach { v ->

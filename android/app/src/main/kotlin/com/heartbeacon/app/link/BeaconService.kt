@@ -101,7 +101,7 @@ class BeaconService : LifecycleService() {
     private val mqttListener = object : MqttLink.Listener {
         override fun onServer(up: Boolean) = onLoop { serverChanged(up, now()) }
         override fun onMessage(payload: ByteArray) = onLoop { serverMessage(payload, now()) }
-        override fun onPublished(id: String) = onLoop { published(id); emptyList() }
+        override fun onPublished(id: String) = onLoop { published(id, now()) }
     }
 
     private fun run(outs: List<RelayOut>) = outs.forEach { o ->

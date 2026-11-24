@@ -21,6 +21,9 @@ class Format(private val zone: ZoneId, private val locale: Locale) {
 
     fun clock(t: LocalTime): String = time.format(t)
 
+    /** The schedule's stop: `stop <= start` runs past midnight, and equal is 24 h (PROTOCOL.md 7.2). */
+    fun sleeps(start: LocalTime, stop: LocalTime): String = if (stop <= start) "${clock(stop)} next day" else clock(stop)
+
     private fun daysBetween(ms: Long, now: Long) = ChronoUnit.DAYS.between(
         Instant.ofEpochMilli(ms).atZone(zone).toLocalDate(),
         Instant.ofEpochMilli(now).atZone(zone).toLocalDate(),

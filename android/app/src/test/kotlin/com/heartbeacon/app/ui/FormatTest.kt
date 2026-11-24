@@ -39,4 +39,11 @@ class FormatTest {
         assertEquals("Asha sent a Heart", f.event(Mood.HEART, "Asha"))
         assertEquals("You sent an Annoy", f.event(Mood.ANNOY, null))
     }
+
+    @Test fun scheduleStopPastMidnightSaysNextDay() {
+        val t = { s: String -> java.time.LocalTime.parse(s) }
+        assertEquals("19:00", f.sleeps(t("09:00"), t("19:00")))
+        assertEquals("06:00 next day", f.sleeps(t("22:00"), t("06:00")))
+        assertEquals("09:00 next day", f.sleeps(t("09:00"), t("09:00"))) // equal = 24 h on
+    }
 }

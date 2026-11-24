@@ -36,6 +36,7 @@ class RelayTest {
         assertTrue(engine.sendMood("heart", 1_000).isEmpty())
         val out = published(engine.serverChanged(true, 2_000))
         assertEquals(listOf("link", "mood"), out.map { it.t })
+        assertEquals(setOf("did", "ble"), out[0].body.keys) // exactly, no `up` (PROTOCOL.md 3)
         assertEquals("HB-3FA2C1", out[0].body["did"]!!.jsonPrimitive.content)
         assertEquals(false, out[0].body["ble"]!!.jsonPrimitive.boolean)
         assertEquals("heart", out[1].body["k"]!!.jsonPrimitive.content)
@@ -50,12 +51,13 @@ class RelayTest {
     }
 
     @Test fun bleUpSendsTimeAndLinkAndReportsToRouter() {
-        engine.serverChanged(true, 0).forEach { if (it is RelayOut.Publish) engine.published(it.id) }
+        engine.serverChanged(true, 0).forEach { if (it is RelayOut.Publish) engine.published(it.id, 0) }
         val out = engine.bleChanged(true, 1_700_000_000_000, mtu = 247)
         val sent = toBeacon(out)
         assertEquals(listOf("time", "link"), sent.map { it.t })
         assertEquals(1_700_000_000L, sent[0].ts)
         assertEquals(330, sent[0].body["tz"]!!.jsonPrimitive.content.toInt())
+        assertEquals(setOf("up"), sent[1].body.keys)
         assertEquals(true, sent[1].body["up"]!!.jsonPrimitive.boolean)
         val toRouter = published(out).single()
         assertEquals("link", toRouter.t)
@@ -82,7 +84,7 @@ class RelayTest {
     @Test fun beaconStateIsRelayedAndShownLocally() {
         engine.serverChanged(true, 0)
         engine.bleChanged(true, 0)
-        val state = beaconMsg("state", "00000000000000ab", buildJsonObject { put("st", JsonPrimitive("NEAR")); put("path", JsonPrimitive("ble")) })
+        val state = beaconMsg("state", "00000000000000ab", buildJsonObject { put("st", JsonPrimitive("near")); put("path", JsonPrimitive("ble")) })
         val out = framesFromBeacon(state, 1, 0)
         assertEquals("state", (out[0] as RelayOut.Local).msg.t)
         assertEquals("relay", published(out).single().t)
@@ -140,7 +142,7 @@ class RelayTest {
 
     @Test fun noPubackIn5sMarksServerDeadAndResendsSameId() {
         engine.bleChanged(true, 0)
-        engine.serverChanged(true, 0).forEach { if (it is RelayOut.Publish) engine.published(it.id) }
+        engine.serverChanged(true, 0).forEach { if (it is RelayOut.Publish) engine.published(it.id, 0) }
         val first = engine.sendMood("heart", 1_000).single() as RelayOut.Publish
         assertTrue(engine.tick(5_999).isEmpty())
         val out = engine.tick(6_000)
@@ -153,9 +155,9 @@ class RelayTest {
     }
 
     @Test fun pubackStopsTheTimer() {
-        engine.serverChanged(true, 0).forEach { if (it is RelayOut.Publish) engine.published(it.id) }
+        engine.serverChanged(true, 0).forEach { if (it is RelayOut.Publish) engine.published(it.id, 0) }
         val p = engine.sendMood("annoy", 0).single() as RelayOut.Publish
-        engine.published(p.id)
+        engine.published(p.id, 0)
         assertTrue(engine.tick(60_000).isEmpty())
     }
 
@@ -180,6 +182,77 @@ class RelayTest {
         engine.bleChanged(true, 2)
         // The tail of the old message must not complete anything.
         assertTrue(frames.drop(1).flatMap { engine.bleFrame(it, 3) }.none { it is RelayOut.Publish })
+    }
+
+    @Test fun relayedBeaconMessageIsAckedOverBleAfterPuback() {
+        engine.serverChanged(true, 0).forEach { if (it is RelayOut.Publish) engine.published(it.id, 0) }
+        engine.bleChanged(true, 0)
+        val mood = beaconMsg("mood", "00000000000000d0", buildJsonObject { put("k", JsonPrimitive("heart")) })
+        val relay = framesFromBeacon(mood, 5, 10).filterIsInstance<RelayOut.Publish>().single()
+        assertTrue(engine.tick(1_000).isEmpty()) // no ack before the broker has it
+        val ack = toBeacon(engine.published(relay.id, 2_000)).single()
+        assertEquals("resp", ack.t)
+        assertEquals(mapOf("re" to "00000000000000d0", "ok" to "true"), ack.body.mapValues { it.value.jsonPrimitive.content })
+        assertEquals(2L, ack.ts)
+        assertTrue(engine.published(relay.id, 2_001).isEmpty()) // a duplicate PUBACK acks nothing
+    }
+
+    @Test fun noAckWhileTheServerIsDownThenAckAfterTheFlush() {
+        engine.bleChanged(true, 0)
+        val mood = beaconMsg("mood", "00000000000000d1", buildJsonObject { put("k", JsonPrimitive("sorry")) })
+        assertTrue(framesFromBeacon(mood, 6, 0).isEmpty()) // queued: the beacon's 5 s rule takes WiFi
+        val relay = engine.serverChanged(true, 9_000).filterIsInstance<RelayOut.Publish>().last()
+        assertEquals("00000000000000d1", toBeacon(engine.published(relay.id, 9_500)).single().body["re"]!!.jsonPrimitive.content)
+    }
+
+    @Test fun appMessagesAndLostBleGetNoAck() {
+        engine.serverChanged(true, 0).forEach { if (it is RelayOut.Publish) engine.published(it.id, 0) }
+        val own = engine.sendMood("heart", 0).single() as RelayOut.Publish
+        assertTrue(engine.published(own.id, 1).isEmpty()) // the app's own mood: nothing to ack on BLE
+        engine.bleChanged(true, 0)
+        val tele = beaconMsg("tele", "00000000000000d2", buildJsonObject { put("mv", JsonPrimitive(3900)) })
+        val relay = framesFromBeacon(tele, 7, 0).filterIsInstance<RelayOut.Publish>().single()
+        engine.bleChanged(false, 1)
+        assertTrue(engine.published(relay.id, 2).isEmpty())
+    }
+
+    @Test fun maxSizeBeaconMessageStillFitsInARelay() {
+        engine.serverChanged(true, 0)
+        engine.bleChanged(true, 0)
+        val head = beaconMsg("tele", "00000000000000d3", buildJsonObject { put("pad", JsonPrimitive("")) }).size
+        val msg = beaconMsg("tele", "00000000000000d3", buildJsonObject { put("pad", JsonPrimitive("x".repeat(896 - head))) })
+        assertEquals(896, msg.size)
+        val relay = framesFromBeacon(msg, 8, 0).filterIsInstance<RelayOut.Publish>().single()
+        assertTrue(relay.payload.size <= Envelope.MAX_BYTES)
+        assertEquals(0, engine.dropped)
+    }
+
+    @Test fun deviceStatusFromTheRouterStaysOnThePhone() {
+        engine.bleChanged(true, 0)
+        for ((t, body) in listOf(
+            "state" to buildJsonObject { put("st", JsonPrimitive("away")); put("path", JsonPrimitive("wifi")) },
+            "tele" to buildJsonObject { put("mv", JsonPrimitive(3912)) },
+        )) {
+            val relay = Envelope.encode("relay", "00000000000000e0", 0, buildJsonObject {
+                put("did", JsonPrimitive("HB-3FA2C1"))
+                put("m", Json.parseToJsonElement(beaconMsg(t, "00000000000000e1", body).decodeToString()))
+            })
+            val out = engine.serverMessage(relay, 0)
+            assertEquals(t, (out.single() as RelayOut.Local).msg.t) // shown in the app, not written to the beacon
+            assertEquals("00000000000000e1", (out.single() as RelayOut.Local).msg.id)
+        }
+    }
+
+    @Test fun cfgInsideARelayIsDropped() {
+        engine.bleChanged(true, 0)
+        val cfg = beaconMsg("cfg", "00000000000000e2", buildJsonObject {
+            put("n", JsonPrimitive(2)); put("b", JsonPrimitive("e30")); put("s", JsonPrimitive("x"))
+        })
+        val relay = Envelope.encode("relay", "00000000000000e3", 0, buildJsonObject {
+            put("did", JsonPrimitive("HB-3FA2C1"))
+            put("m", Json.parseToJsonElement(cfg.decodeToString()))
+        })
+        assertTrue(engine.serverMessage(relay, 0).isEmpty())
     }
 
     @Test fun beaconFramesUseRunningSequence() {
