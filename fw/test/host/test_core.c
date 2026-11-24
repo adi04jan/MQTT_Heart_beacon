@@ -5,7 +5,12 @@
 
 #include <string.h>
 
-void setUp(void) {}
+static bool g_wifi, g_cached;  // hb_boot_t.wifi / .ap_cached for the next boot()
+
+void setUp(void)
+{
+    g_wifi = g_cached = false;
+}
 void tearDown(void) {}
 
 // ---- hb_button -------------------------------------------------------------------------------------
@@ -376,6 +381,21 @@ static hb_mood_t g_mood;  // last mood sent
 static hb_up_t g_ups[64];  // every uplink since boot()
 static int g_n_ups;
 static int g_measured, g_measured_lit, g_low_starts;
+static struct {
+    uint8_t cmd;  // hb_link_cmd_t
+    uint32_t t;
+} g_links[64];  // every link command since boot()
+static int g_n_links, g_teles, g_reports;
+
+static void rec(void)
+{
+    if (act.link && g_n_links < 64) {
+        g_links[g_n_links].cmd = act.link;
+        g_links[g_n_links++].t = now;
+    }
+    g_teles += act.tele;
+    g_reports += act.state_changed;
+}
 
 static void boot(hb_wake_t wake, bool claimed, bool pressed, uint32_t mv, uint32_t epoch)
 {
@@ -383,8 +403,11 @@ static void boot(hb_wake_t wake, bool claimed, bool pressed, uint32_t mv, uint32
     g_mv = mv;
     g_mood = HB_MOOD_NONE;
     g_n_ups = 0;
-    hb_boot_t b = {.wake = wake, .claimed = claimed, .pressed = pressed, .mv = mv, .epoch = epoch, .seed = 42};
+    g_n_links = g_teles = g_reports = 0;
+    hb_boot_t b = {.wake = wake, .claimed = claimed, .pressed = pressed, .mv = mv, .epoch = epoch, .seed = 42,
+                   .wifi = g_wifi, .ap_cached = g_cached};
     hb_core_boot(&core, &g_cfg, &b, now, &act);
+    rec();
 }
 
 static void step(const hb_ev_t *ev)
@@ -400,6 +423,7 @@ static void step(const hb_ev_t *ev)
         }
     }
     g_low_starts += core.fx.kind == HB_FX_LOW && (before.kind != HB_FX_LOW || before.t0 != core.fx.t0);
+    rec();
 }
 
 // Runs like the port: waits act.next_ms, answers measure_batt with g_mv, holds the button level
@@ -827,6 +851,199 @@ static void test_duplicate_show_answers_shown_without_replaying(void)
     TEST_ASSERT_EQUAL_INT(before, g_n_ups);
 }
 
+// ---- hb_link: WiFi + MQTT through hb_core ---------------------------------------------------------
+
+static void wifi(bool up)
+{
+    hb_ev_t e = {.type = HB_EV_WIFI, .up = up};
+    step(&e);
+}
+
+static void mqtt(bool up)
+{
+    hb_ev_t e = {.type = HB_EV_MQTT, .up = up};
+    step(&e);
+}
+
+static uint8_t last_link(void)
+{
+    return g_n_links ? g_links[g_n_links - 1].cmd : HB_LINK_NONE;
+}
+
+static void test_link_backoff_5s_15s_60s_5m_15m_then_30m_and_never_sleeps(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_SCAN, last_link());  // nothing cached yet: scan
+    static const uint32_t want[] = {5000, 15000, 60000, 300000, 900000, 1800000, 1800000, 1800000};
+    for (int i = 0; i < 8; i++) {
+        wifi(false);  // no known AP answered
+        TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+        uint32_t t0 = now;
+        int n = g_n_links;
+        TEST_ASSERT_FALSE(run(want[i] + 200, false));  // light sleep in OFFLINE: no deep sleep, no reboot
+        TEST_ASSERT_EQUAL_INT(n + 1, g_n_links);
+        TEST_ASSERT_EQUAL_UINT8(HB_LINK_SCAN, last_link());
+        TEST_ASSERT_EQUAL_UINT32(t0 + want[i], g_links[g_n_links - 1].t);
+        TEST_ASSERT_EQUAL_INT(HB_ST_OFFLINE, act.state);
+    }
+}
+
+static void test_link_cached_ap_first_then_scan_at_once_then_mqtt(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = g_cached = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());
+    wifi(false);  // the cached BSSID is gone
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_SCAN, last_link());
+    TEST_ASSERT_EQUAL_UINT32(g_links[0].t, g_links[1].t);  // no wait before the scan
+    wifi(true);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_MQTT, last_link());
+    TEST_ASSERT_EQUAL_INT(HB_ST_OFFLINE, act.state);  // an IP alone is no path to the server
+    mqtt(true);
+    TEST_ASSERT_EQUAL_INT(HB_ST_AWAY, act.state);
+    TEST_ASSERT_TRUE(act.state_changed && act.tele);
+
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);  // a cached AP that never answers: scan after 5 s
+    uint32_t t0 = now;
+    run(HB_LINK_FAST_MS + 100, false);
+    TEST_ASSERT_EQUAL_INT(2, g_n_links);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_SCAN, last_link());
+    TEST_ASSERT_EQUAL_UINT32(t0 + HB_LINK_FAST_MS, g_links[1].t);
+}
+
+static void test_link_drop_retries_after_1s_then_backs_off(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    wifi(true);
+    mqtt(true);
+    run(2000, false);
+    mqtt(false);  // broker or AP gone
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+    TEST_ASSERT_EQUAL_INT(HB_ST_OFFLINE, act.state);
+    uint32_t t0 = now;
+    run(HB_LINK_QUICK_MS + 100, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());  // the join cached the AP
+    TEST_ASSERT_EQUAL_UINT32(t0 + HB_LINK_QUICK_MS, g_links[g_n_links - 1].t);
+    wifi(false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_SCAN, last_link());
+    wifi(false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+    t0 = now;
+    run(5100, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());
+    TEST_ASSERT_EQUAL_UINT32(t0 + 5000, g_links[g_n_links - 1].t);
+    wifi(true);
+    mqtt(true);
+    TEST_ASSERT_EQUAL_INT(HB_ST_AWAY, act.state);
+    mqtt(false);  // a success reset the count: the next failed round waits 5 s again
+    run(HB_LINK_QUICK_MS, false);
+    wifi(false);
+    wifi(false);
+    t0 = now;
+    run(5100, false);
+    TEST_ASSERT_EQUAL_UINT32(t0 + 5000, g_links[g_n_links - 1].t);
+}
+
+static void test_link_mqtt_without_connack_is_a_failed_round(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    wifi(true);
+    uint32_t t0 = now;
+    run(HB_LINK_MQTT_MS + 100, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+    TEST_ASSERT_EQUAL_UINT32(t0 + HB_LINK_MQTT_MS, g_links[g_n_links - 1].t);
+    wifi(false);  // a late disconnect from the teardown is ignored while waiting
+    mqtt(false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+    run(5000, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());
+}
+
+static void test_every_connect_reports_state_then_tele_every_tele_min(void)
+{
+    g_cfg = hb_cfg_default;
+    g_cfg.tele_min = 2;
+    g_wifi = true;
+    boot(HB_WAKE_POWERON, false, false, 3900, 0);  // unclaimed: PAIRING, the state does not change on connect
+    wifi(true);
+    int reports = g_reports;
+    mqtt(true);
+    TEST_ASSERT_EQUAL_INT(HB_ST_PAIRING, act.state);
+    TEST_ASSERT_TRUE(act.state_changed);
+    TEST_ASSERT_EQUAL_INT(reports + 1, g_reports);
+    TEST_ASSERT_EQUAL_INT(1, g_teles);
+    run(2 * 60000 + 100, false);
+    TEST_ASSERT_EQUAL_INT(2, g_teles);
+    run(2 * 60000, false);
+    TEST_ASSERT_EQUAL_INT(3, g_teles);
+    wifi(false);
+    run(10 * 60000, false);  // link down: no tele, even after reconnect attempts fail
+    TEST_ASSERT_EQUAL_INT(3, g_teles);
+}
+
+static void test_heart_tapped_offline_goes_out_on_connect_and_again_after_a_reconnect(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    run(3000, false);
+    tap(1);
+    TEST_ASSERT_EQUAL_INT(0, g_n_ups);  // no path yet: queued
+    wifi(true);
+    mqtt(true);
+    TEST_ASSERT_EQUAL_INT(1, g_n_ups);
+    uint64_t id = g_ups[0].id;
+    TEST_ASSERT_TRUE(g_ups[0].k == HB_MOOD_HEART && g_ups[0].path == HB_PATH_WIFI);
+    run(HB_ACK_MS + 100, false);  // no PUBACK: the other path (BLE, dropped by the M3 port), then parked
+    TEST_ASSERT_EQUAL_INT(2, g_n_ups);
+    TEST_ASSERT_TRUE(g_ups[1].id == id && g_ups[1].path == HB_PATH_BLE);
+    run(HB_ACK_MS + 100, false);
+    TEST_ASSERT_EQUAL_INT(2, g_n_ups);
+    mqtt(false);
+    run(HB_LINK_QUICK_MS, false);
+    wifi(true);
+    mqtt(true);  // reconnected: resent with the same id (the router dedupes on did + id)
+    TEST_ASSERT_EQUAL_INT(3, g_n_ups);
+    TEST_ASSERT_TRUE(g_ups[2].id == id && g_ups[2].path == HB_PATH_WIFI);
+    ack(id);
+    TEST_ASSERT_EQUAL_UINT8(0, core.n_out);
+}
+
+static void test_config_use_wifi_stops_and_restarts_the_link(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    wifi(true);
+    mqtt(true);
+    hb_cfg_t c = hb_cfg_default;
+    c.n = 2;
+    c.use_wifi = false;
+    hb_ev_t e = {.type = HB_EV_CFG, .cfg = &c};
+    step(&e);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+    TEST_ASSERT_EQUAL_INT(HB_ST_OFFLINE, act.state);
+    TEST_ASSERT_EQUAL_UINT32(2, core.cfg.n);
+    int n = g_n_links;
+    run(60000, false);
+    TEST_ASSERT_EQUAL_INT(n, g_n_links);  // stays off
+    c.use_wifi = true;
+    step(&e);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());
+
+    g_wifi = false;  // nothing provisioned: the link never starts
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    run(60000, false);
+    TEST_ASSERT_EQUAL_INT(0, g_n_links);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -866,5 +1083,12 @@ int main(void)
     RUN_TEST(test_outbox_keeps_the_newest_four_with_distinct_ids);
     RUN_TEST(test_unacked_mood_survives_deep_sleep_and_goes_out_on_the_first_path);
     RUN_TEST(test_duplicate_show_answers_shown_without_replaying);
+    RUN_TEST(test_link_backoff_5s_15s_60s_5m_15m_then_30m_and_never_sleeps);
+    RUN_TEST(test_link_cached_ap_first_then_scan_at_once_then_mqtt);
+    RUN_TEST(test_link_drop_retries_after_1s_then_backs_off);
+    RUN_TEST(test_link_mqtt_without_connack_is_a_failed_round);
+    RUN_TEST(test_every_connect_reports_state_then_tele_every_tele_min);
+    RUN_TEST(test_heart_tapped_offline_goes_out_on_connect_and_again_after_a_reconnect);
+    RUN_TEST(test_config_use_wifi_stops_and_restarts_the_link);
     return UNITY_END();
 }

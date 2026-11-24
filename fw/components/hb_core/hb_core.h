@@ -9,6 +9,7 @@
 #include "hb_button.h"
 #include "hb_cfg.h"
 #include "hb_fx.h"
+#include "hb_link.h"
 
 #define HB_TICK_MS 20               // frame and button sampling period while something is moving
 #define HB_BATT_PERIOD_MS 30000     // battery sample period, also the longest the core sleeps between steps
@@ -37,11 +38,14 @@ typedef enum {
     HB_EV_TICK,      // pressed = button level now (the port samples it for every tick)
     HB_EV_BATT,      // mv = battery mV after the divider, answering actions.measure_batt
     HB_EV_TIME,      // ts = epoch seconds from the phone or router (`time` message)
-    HB_EV_SHOW,      // k + id (`show` message): plays once per id, answers `shown` every time; radio stub until M3
-    HB_EV_SLEEP,     // for_s (`sleep` message, 0 = until schedule on or button); radio stub until M3
-    HB_EV_PATH,      // path = live server path, as decided by hb_link; radio stub until M3/M4
+    HB_EV_SHOW,      // k + id (`show` message): plays once per id, answers `shown` every time
+    HB_EV_SLEEP,     // for_s (`sleep` message, 0 = until schedule on or button)
+    HB_EV_PATH,      // path = live server path reported by the BLE side (M4); WiFi comes from the link events
     HB_EV_CLAIMED,   // claim accepted (closes the pairing window); radio stub until M4
     HB_EV_ACK,       // id: an uplink was acked (WiFi: its PUBACK; BLE: the phone's `resp{re: id, ok: true}`)
+    HB_EV_WIFI,      // up: WiFi has an IP / a join failed or the association dropped (hb_link)
+    HB_EV_MQTT,      // up: CONNACK / the session failed or dropped (hb_link)
+    HB_EV_CFG,       // cfg: a verified config to run on from now (hb_config_accept)
 } hb_ev_type_t;
 
 typedef struct {
@@ -53,6 +57,8 @@ typedef struct {
         hb_mood_t k;
         uint32_t for_s;
         hb_path_t path;
+        bool up;
+        const hb_cfg_t *cfg;
     };
     uint64_t id;  // HB_EV_SHOW, HB_EV_ACK (hb_id_parse of the envelope id)
 } hb_ev_t;
@@ -80,9 +86,11 @@ typedef struct {
     uint32_t mv;      // first battery sample, taken before any LED lights
     uint32_t epoch;   // wall clock kept by the RTC across deep sleep, 0 = unknown
     uint64_t seed;    // random bits (esp_random) mixed into the message id generator on every boot
+    bool wifi;        // a WiFi network and a server are provisioned: the link runs (with net.use_wifi)
+    bool ap_cached;   // the port holds the last AP's BSSID + channel (RTC memory): try that first
 } hb_boot_t;
 
-// Apply in field order: LEDs, uplinks, measurement, then deep sleep.
+// Apply: LEDs, the link command, publishes (state, tele, then up[] in order), measurement, then deep sleep.
 typedef struct {
     bool led_dirty;                 // push led[] (only set when the frame changed)
     uint8_t led[HB_PIXELS][3];      // r, g, b
@@ -91,8 +99,10 @@ typedef struct {
     bool measure_batt;              // read the battery and post HB_EV_BATT
     bool sleep;                     // enter deep sleep now; LEDs are dark, button wake on
     uint32_t sleep_s;               // with a timer wake after this many seconds, 0 = button only
+    uint8_t link;                   // hb_link_cmd_t for the WiFi / MQTT driver
+    bool tele;                      // publish `tele` (on every connect, then every net.tele_min)
     hb_state_t state;
-    bool state_changed;             // publish `state` (M3) before acting on sleep
+    bool state_changed;             // publish `state` (also on every connect) before acting on sleep
     uint32_t next_ms;               // step again (HB_EV_TICK) within this many ms
 } hb_actions_t;
 
@@ -114,12 +124,19 @@ typedef struct {
     uint8_t n_seen, seen_next;
     hb_pend_t out[HB_OUTBOX];   // moods sent or waiting to be, oldest first
     uint8_t n_out;
+    hb_link_t link;
+    bool wifi_known;            // hb_boot_t.wifi
+    bool report;                // the link just came up: report state even if unchanged
+    uint32_t tele_due;          // ms deadline of the next `tele` while the link is up
 } hb_core_t;
 
 // Every boot, before any step. On HB_WAKE_POWERON the core is reset; otherwise c holds the state it
 // slept in (RTC memory) and the wake is interpreted against it.
 void hb_core_boot(hb_core_t *c, const hb_cfg_t *cfg, const hb_boot_t *boot, uint32_t now_ms, hb_actions_t *out);
 void hb_core_step(hb_core_t *c, const hb_ev_t *ev, uint32_t now_ms, hb_actions_t *out);
+
+// A fresh random message id (for the port's own messages: state, tele, resp).
+uint64_t hb_core_new_id(hb_core_t *c);
 
 // Wall clock at now_ms, 0 if unknown.
 uint32_t hb_core_epoch(const hb_core_t *c, uint32_t now_ms);

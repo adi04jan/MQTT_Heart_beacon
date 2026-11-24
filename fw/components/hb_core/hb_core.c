@@ -58,7 +58,7 @@ static void activity(hb_core_t *c, uint32_t now_ms)
     }
 }
 
-static uint64_t new_id(hb_core_t *c)  // splitmix64
+uint64_t hb_core_new_id(hb_core_t *c)  // splitmix64
 {
     uint64_t z = (c->rng += 0x9e3779b97f4a7c15ull);
     z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
@@ -80,7 +80,7 @@ static void queue_mood(hb_core_t *c, hb_mood_t k)
         memmove(&c->out[0], &c->out[1], sizeof c->out[0] * (HB_OUTBOX - 1));
         c->n_out--;
     }
-    c->out[c->n_out++] = (hb_pend_t){.id = new_id(c), .k = (uint8_t)k, .path = HB_PATH_NONE};
+    c->out[c->n_out++] = (hb_pend_t){.id = hb_core_new_id(c), .k = (uint8_t)k, .path = HB_PATH_NONE};
 }
 
 // PROTOCOL.md 4: send a waiting mood on the live path; no ack in 5 s, the same id on the other path; no
@@ -134,6 +134,44 @@ static void remember(hb_core_t *c, uint64_t id)
     c->seen_next = (uint8_t)((c->seen_next + 1) % HB_SEEN);
     if (c->n_seen < HB_SEEN) {
         c->n_seen++;
+    }
+}
+
+// A path report retries the parked moods (sent on both paths without an ack) on the new path.
+static void set_path(hb_core_t *c, hb_path_t p, uint32_t now_ms)
+{
+    c->path = p;
+    for (uint8_t i = 0; i < c->n_out; i++) {
+        hb_pend_t *m = &c->out[i];
+        if (m->sends == 2 && hb_due(now_ms, m->due)) {
+            m->path = HB_PATH_NONE;
+            m->sends = 0;
+        }
+    }
+}
+
+static bool wifi_wanted(const hb_core_t *c)
+{
+    return c->wifi_known && c->cfg.use_wifi;
+}
+
+// Feeds hb_link; the WiFi path is live exactly while the link is up (BLE, when live, stays the path).
+static void link_in(hb_core_t *c, hb_link_in_t in, uint32_t now_ms, hb_actions_t *out)
+{
+    bool was = c->link.st == HB_LS_UP;
+    hb_link_cmd_t cmd = hb_link_ev(&c->link, in, now_ms);
+    if (cmd != HB_LINK_NONE) {
+        out->link = (uint8_t)cmd;
+    }
+    bool up = c->link.st == HB_LS_UP;
+    if (up && !was) {
+        if (c->path != HB_PATH_BLE) {
+            set_path(c, HB_PATH_WIFI, now_ms);
+        }
+        c->report = true;  // every connect reports state and tele (PROTOCOL.md 3), the router answers `time`
+        c->tele_due = now_ms;
+    } else if (was && !up && c->path == HB_PATH_WIFI) {
+        set_path(c, HB_PATH_NONE, now_ms);
     }
 }
 
@@ -193,6 +231,9 @@ static uint32_t sooner(uint32_t cur, uint32_t now_ms, uint32_t t)
 // Common tail of boot and step: state, frame, and when to come back.
 static void finish(hb_core_t *c, hb_state_t before, uint32_t now_ms, hb_actions_t *out)
 {
+    if (out->link == HB_LINK_NONE) {
+        link_in(c, HB_LI_POLL, now_ms, out);
+    }
     hb_policy_eval(c, now_ms);
     pump(c, now_ms, out);
     if (c->state == HB_ST_PAIRING && c->fx.kind == HB_FX_NONE) {
@@ -209,6 +250,11 @@ static void finish(hb_core_t *c, hb_state_t before, uint32_t now_ms, hb_actions_
         out->led_dirty = true;
     }
     busy = busy || hb_btn_busy(&c->btn);
+    bool up = c->link.st == HB_LS_UP;
+    if (up && hb_due(now_ms, c->tele_due)) {
+        out->tele = true;
+        c->tele_due = now_ms + c->cfg.tele_min * 60000u;
+    }
 
     if (c->sleep_pending && !busy) {
         out->sleep = true;
@@ -231,10 +277,14 @@ static void finish(hb_core_t *c, hb_state_t before, uint32_t now_ms, hb_actions_
         for (uint8_t i = 0; i < c->n_out; i++) {
             next = sooner(next, now_ms, c->out[i].due);  // past deadlines (parked) are ignored
         }
+        if (c->link.st != HB_LS_OFF) {
+            next = sooner(next, now_ms, up ? c->tele_due : c->link.due);
+        }
     }
     out->next_ms = next;
     out->state = c->state;
-    out->state_changed = c->state != before;
+    out->state_changed = c->state != before || c->report;
+    c->report = false;
 }
 
 void hb_core_boot(hb_core_t *c, const hb_cfg_t *cfg, const hb_boot_t *boot, uint32_t now_ms, hb_actions_t *out)
@@ -254,6 +304,9 @@ void hb_core_boot(hb_core_t *c, const hb_cfg_t *cfg, const hb_boot_t *boot, uint
     c->state = HB_ST_OFFLINE;
     c->path = HB_PATH_NONE;
     c->claimed = boot->claimed;
+    c->wifi_known = boot->wifi;
+    c->link = (hb_link_t){.cached = boot->ap_cached};
+    c->report = false;
     c->sleep_pending = false;
     c->epoch0 = boot->epoch;
     c->ms0 = now_ms;
@@ -279,6 +332,9 @@ void hb_core_boot(hb_core_t *c, const hb_cfg_t *cfg, const hb_boot_t *boot, uint
             c->nap_due = now_ms + HB_NAP_CHECKIN_MS;
         }
         break;
+    }
+    if (wifi_wanted(c)) {
+        link_in(c, HB_LI_START, now_ms, out);
     }
     if (boot->wake != HB_WAKE_TIMER) {  // a timer wake is quiet
         if (c->batt.low) {
@@ -324,14 +380,7 @@ void hb_core_step(hb_core_t *c, const hb_ev_t *ev, uint32_t now_ms, hb_actions_t
         }
         break;
     case HB_EV_PATH:
-        c->path = ev->path;
-        for (uint8_t i = 0; i < c->n_out; i++) {  // a path report retries parked moods
-            hb_pend_t *p = &c->out[i];
-            if (p->sends == 2 && hb_due(now_ms, p->due)) {
-                p->path = HB_PATH_NONE;
-                p->sends = 0;
-            }
-        }
+        set_path(c, ev->path, now_ms);
         break;
     case HB_EV_CLAIMED:
         c->claimed = true;
@@ -339,6 +388,16 @@ void hb_core_step(hb_core_t *c, const hb_ev_t *ev, uint32_t now_ms, hb_actions_t
         break;
     case HB_EV_ACK:
         acked(c, ev->id);
+        break;
+    case HB_EV_WIFI:
+        link_in(c, ev->up ? HB_LI_WIFI_UP : HB_LI_WIFI_DOWN, now_ms, out);
+        break;
+    case HB_EV_MQTT:
+        link_in(c, ev->up ? HB_LI_MQTT_UP : HB_LI_MQTT_DOWN, now_ms, out);
+        break;
+    case HB_EV_CFG:
+        c->cfg = *ev->cfg;
+        link_in(c, wifi_wanted(c) ? HB_LI_START : HB_LI_STOP, now_ms, out);
         break;
     }
     finish(c, before, now_ms, out);
