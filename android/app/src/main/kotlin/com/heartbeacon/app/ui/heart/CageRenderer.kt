@@ -171,10 +171,11 @@ class CageRenderer {
         total /= 9f // 0..3
 
         cyw = cos(yaw); syw = sin(yaw); cp = cos(pitch); sp = sin(pitch); sq = squash
-        // On the pale cloth a dimmed beacon would go dark brown; it pales instead, through the fade.
-        dim = when (look) { Look.AWAKE -> 1f; Look.ASLEEP -> if (paper) 0.8f else 0.5f; Look.OFFLINE -> if (paper) 0.8f else 0.44f }
+        // On the pale cloth a fully dimmed beacon would go dark brown: asleep it dims part way, cools and thins into
+        // the cloth; offline it pales and greys out.
+        dim = when (look) { Look.AWAKE -> 1f; Look.ASLEEP -> if (paper) 0.66f else 0.5f; Look.OFFLINE -> if (paper) 0.8f else 0.44f }
         sat = if (look == Look.OFFLINE) 0.12f else 1f
-        alpha = if (look == Look.OFFLINE) 0.58f else 1f
+        alpha = when { look == Look.OFFLINE -> 0.58f; look == Look.ASLEEP && paper -> 0.8f; else -> 1f }
         cool = look == Look.ASLEEP
         hw = halfWidth; cx0 = center.x; cy0 = center.y
 
@@ -226,7 +227,7 @@ class CageRenderer {
         }
         if (total > 0.01f) {
             val mean = ledMean()
-            val k = if (paper) 0.6f else 1f
+            val k = if (paper) 0.9f else 1f
             glow(cx0, floorY, hw * 1.3f, hw * 0.24f, mean, (0.5f * total).coerceAtMost(0.7f) * dim * k)
             // Bloom in the air around the cage, the LEDs' colour filling the case.
             glow(cx0, cy0, hw * 1.8f, hw * 1.8f, mean, (0.30f * total).coerceAtMost(0.45f) * dim * k)

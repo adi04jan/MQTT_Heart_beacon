@@ -2,6 +2,7 @@
 
 package com.heartbeacon.app.ui.heart
 
+import android.content.Context
 import android.graphics.RuntimeShader
 import android.os.SystemClock
 import android.provider.Settings
@@ -18,7 +19,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,19 +30,24 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -73,6 +81,8 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
@@ -83,6 +93,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.edit
 import com.heartbeacon.app.data.Beacon
 import com.heartbeacon.app.data.Event
 import com.heartbeacon.app.data.Mark
@@ -117,12 +128,20 @@ object Stage {
     val label @Composable @ReadOnlyComposable get() = pick(light, 0xFF5D5363, 0xFFA898AE)
     val pipOff @Composable @ReadOnlyComposable get() = pick(light, 0xFFBFB3C6, 0xFF3D3145)
     val warn @Composable @ReadOnlyComposable get() = pick(light, 0xFFB3261E, 0xFFF2B8B5)
-    val brass @Composable @ReadOnlyComposable get() = pick(light, 0xFFB98E2B, 0xFFE2BC6A)
+    val brass @Composable @ReadOnlyComposable get() = pick(light, 0xFFA57C1F, 0xFFE2BC6A)
+    /** Brass as text (text buttons on the cloth): darker by day, so it reads at 5:1 on the lilac. */
+    val brassInk @Composable @ReadOnlyComposable get() = pick(light, 0xFF684C0D, 0xFFE2BC6A)
     val onBrass @Composable @ReadOnlyComposable get() = pick(light, 0xFF231700, 0xFF2E2100)
 }
 
 private const val REST_YAW = -0.26f
 private const val REST_PITCH = 0.06f
+
+/** How long a mood waits before it goes out, so a stray poke can be taken back. */
+private const val TAKE_BACK_MS = 1_500L
+/** A mood that came while the app was closed plays once on opening if it is this recent (the router's window). */
+private const val REPLAY_MS = 24 * 3_600_000L
+private const val PLAYED = "played"
 
 // Cloth under a soft overhead light: a pool where the beacon stands, the cloth's grain, falling off beyond.
 private const val FELT = """
@@ -198,7 +217,6 @@ fun HeartStage(
     val still = animationsOff()
 
     val yaw = remember { Animatable(if (still) REST_YAW else REST_YAW - 1.1f) }
-    val pitch = remember { Animatable(REST_PITCH) }
     val squash = remember { Animatable(1f) }
     val wave = remember { Animatable(0f) }
     var waveMood by remember { mutableStateOf(Mood.HEART) }
@@ -207,7 +225,12 @@ fun HeartStage(
     var tapCount by remember { mutableIntStateOf(0) }
     var tapSerial by remember { mutableIntStateOf(0) }
     var sentFlash by remember { mutableStateOf<Mood?>(null) }
+    var pending by remember { mutableStateOf<Mood?>(null) }
+    var pendingSerial by remember { mutableIntStateOf(0) }
+    var waiting by remember { mutableIntStateOf(0) }
     var lastTouch by remember { mutableLongStateOf(0L) }
+    val ctx = LocalContext.current
+    val prefs = remember { ctx.getSharedPreferences("stage", Context.MODE_PRIVATE) }
 
     val present = beacon != null
     val awake = beacon?.presence == Presence.Near || beacon?.presence == Presence.AwayWifi
@@ -223,29 +246,50 @@ fun HeartStage(
         clock = now
     }
 
+    fun showBattery(pct: Int) {
+        twin.battery(pct, SystemClock.uptimeMillis())
+        play(SystemClock.uptimeMillis())
+    }
+
     // Intro: a turn into the resting three-quarter view, once.
     LaunchedEffect(Unit) {
         if (!still) yaw.animateTo(REST_YAW, tween(1500, easing = FastOutSlowInEasing))
     }
 
-    // Live moods reach the twin as they reach the beacon; history fetched later never replays.
+    // An incoming mood on the twin: at once when the beacon is up, else held for its wake. Remembered, so the same
+    // mood never plays twice on opening.
+    fun arrive(e: Event, up: Boolean) {
+        val now = SystemClock.uptimeMillis()
+        twin.mood(e.mood, up, now)
+        waiting = twin.waiting
+        play(now)
+        prefs.edit { putString(PLAYED, e.id) }
+    }
+
+    // Live moods reach the twin as they reach the beacon. History fetched later does not, except the newest mood
+    // from the other side: it usually came while the app was closed, so it plays once on opening, if the beacon is up
+    // (it played it too). The foot line says when it came.
     val seen = remember { HashSet<String>() }
     var primed by remember { mutableStateOf(false) }
+    var caughtUp by remember { mutableStateOf(false) }
     LaunchedEffect(events) {
         val now = System.currentTimeMillis()
         for (e in events) {
             if (!seen.add(e.id) || !primed) continue
-            if (e.from != null && now - e.atEpochMs < 30_000) {
-                twin.mood(e.mood, awake, SystemClock.uptimeMillis())
-                play(SystemClock.uptimeMillis())
-            }
+            if (e.from != null && now - e.atEpochMs < 30_000) arrive(e, awake)
         }
         primed = true
+        if (!caughtUp && events.isNotEmpty()) {
+            caughtUp = true
+            val last = events.firstOrNull { it.from != null }
+            if (awake && last != null && now - last.atEpochMs < REPLAY_MS && last.id != prefs.getString(PLAYED, null)) arrive(last, true)
+        }
     }
     // The beacon came up: the router flushes what it held, the twin plays it.
     LaunchedEffect(awake) {
         if (awake && twin.waiting > 0) {
             twin.woke(SystemClock.uptimeMillis())
+            waiting = twin.waiting
             play(SystemClock.uptimeMillis())
         }
     }
@@ -260,30 +304,48 @@ fun HeartStage(
         }
     }
 
+    fun fire(m: Mood) {
+        onSend(m)
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        sentFlash = m
+        waveMood = m
+        if (!still) scope.launch {
+            wave.snapTo(0f)
+            wave.animateTo(1f, tween(1300, easing = LinearEasing))
+        }
+    }
+    // A mood waits TAKE_BACK_MS with a Cancel at the foot; a newer one sends the waiting one at once.
+    fun commit(m: Mood) {
+        pending?.let(::fire)
+        pending = m
+        pendingSerial++
+        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    }
+    LaunchedEffect(pendingSerial, pending) {
+        val m = pending ?: return@LaunchedEffect
+        delay(TAKE_BACK_MS)
+        fire(m)
+        pending = null
+    }
+    LaunchedEffect(sentFlash) {
+        if (sentFlash == null) return@LaunchedEffect
+        delay(1_200)
+        sentFlash = null
+    }
+
     // Multi-tap: commit the count once the button's gap passes with no new tap.
     LaunchedEffect(tapSerial) {
         if (tapSerial == 0) return@LaunchedEffect
         delay(Taps.GAP_MS)
         val n = taps.due(SystemClock.uptimeMillis()) ?: return@LaunchedEffect
-        val mood = moodOf(n)
-        onSend(mood)
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         tapCount = 0
-        sentFlash = mood
-        waveMood = mood
-        if (!still) {
-            wave.snapTo(0f)
-            wave.animateTo(1f, tween(1300, easing = LinearEasing))
-        }
-        delay(900)
-        if (sentFlash == mood) sentFlash = null
+        commit(moodOf(n))
     }
 
     // Back to the resting pose a while after the last touch.
     LaunchedEffect(lastTouch) {
         if (lastTouch == 0L) return@LaunchedEffect
         delay(3500)
-        launch { pitch.animateTo(REST_PITCH, spring(stiffness = 40f, dampingRatio = 0.9f)) }
         val target = REST_YAW + Math.round((yaw.value - REST_YAW) / (2 * Math.PI)).toFloat() * (2 * Math.PI).toFloat()
         yaw.animateTo(target, spring(stiffness = 40f, dampingRatio = 0.9f))
     }
@@ -304,9 +366,9 @@ fun HeartStage(
             .semantics {
                 contentDescription = "Your beacon, ${stateText.lowercase()}"
                 customActions = listOf(
-                    CustomAccessibilityAction("Send a Heart") { onSend(Mood.HEART); true },
-                    CustomAccessibilityAction("Send a Sorry") { onSend(Mood.SORRY); true },
-                    CustomAccessibilityAction("Send an Annoy") { onSend(Mood.ANNOY); true },
+                    CustomAccessibilityAction("Send a Heart") { fire(Mood.HEART); true },
+                    CustomAccessibilityAction("Send a Sorry") { fire(Mood.SORRY); true },
+                    CustomAccessibilityAction("Send an Annoy") { fire(Mood.ANNOY); true },
                 )
             },
     ) {
@@ -328,24 +390,19 @@ fun HeartStage(
                     Modifier
                         .fillMaxSize()
                         .pointerInput(Unit) {
+                            // Sideways turns the heart; up and down belongs to the page, so it scrolls on to the list.
                             val tracker = VelocityTracker()
-                            detectDragGestures(
+                            detectHorizontalDragGestures(
                                 onDragStart = { tracker.resetTracking(); lastTouch = 0L },
                                 onDragEnd = {
                                     val v = tracker.calculateVelocity()
                                     scope.launch { yaw.animateDecay(v.x * 0.0075f, exponentialDecay(1.6f)) }
-                                    scope.launch {
-                                        pitch.animateDecay(v.y * 0.0045f, exponentialDecay(2.5f))
-                                    }
                                     lastTouch = SystemClock.uptimeMillis()
                                 },
-                            ) { change, drag ->
+                            ) { change, dx ->
                                 change.consume()
                                 tracker.addPosition(change.uptimeMillis, change.position)
-                                scope.launch {
-                                    yaw.snapTo(yaw.value + drag.x * 0.0075f)
-                                    pitch.snapTo((pitch.value + drag.y * 0.0045f).coerceIn(-0.65f, 0.65f))
-                                }
+                                scope.launch { yaw.snapTo(yaw.value + dx * 0.0075f) }
                             }
                         }
                         .pointerInput(present) {
@@ -367,8 +424,7 @@ fun HeartStage(
                                     val pct = beacon?.batteryPct
                                     if (!inside(p) || pct == null) return@detectTapGestures
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    twin.battery(pct, SystemClock.uptimeMillis())
-                                    play(SystemClock.uptimeMillis())
+                                    showBattery(pct)
                                 },
                             )
                         },
@@ -380,30 +436,39 @@ fun HeartStage(
                     for (i in rgb.indices) rgb[i] = (rgb[i] * k).toInt()
                     with(renderer) {
                         paper = light
-                        if (wave.value in 0.001f..0.999f) wave(wave.value, moodColor(waveMood, onLight = light), yaw.value, pitch.value, center, halfWidth)
-                        draw(rgb, yaw.value, pitch.value, squash.value, look, center, halfWidth)
+                        if (wave.value in 0.001f..0.999f) wave(wave.value, moodColor(waveMood, onLight = light), yaw.value, REST_PITCH, center, halfWidth)
+                        draw(rgb, yaw.value, REST_PITCH, squash.value, look, center, halfWidth)
                     }
                 }
             }
         }
 
-        top()
-
-        if (beacon != null) {
-            Dashboard(beacon, fmt, Modifier.align(Alignment.CenterStart).padding(top = 92.dp, bottom = 24.dp))
+        // Name, dashboard, foot in one column: the dashboard takes the space between, so at any font size it never
+        // runs into the foot.
+        Column(Modifier.fillMaxSize()) {
+            top()
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                // Unbounded: if it ever outgrows the space it spills over the edges rather than losing its last line.
+                if (beacon != null) Dashboard(beacon, fmt, Modifier.align(Alignment.CenterStart).wrapContentHeight(unbounded = true))
+            }
+            val newest = events.firstOrNull()
+            Foot(
+                beacon = beacon,
+                server = server,
+                events = events,
+                waiting = waiting,
+                tapCount = tapCount,
+                pending = pending,
+                sent = sentFlash,
+                fmt = fmt,
+                onAdd = onAdd,
+                onSend = ::commit,
+                onCancel = { pending = null },
+                onBattery = beacon?.batteryPct?.let { pct -> { showBattery(pct) } },
+                onReplay = newest?.takeIf { awake && it.from != null }?.let { e -> { arrive(e, true) } },
+                modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+            )
         }
-
-        Foot(
-            beacon = beacon,
-            server = server,
-            events = events,
-            waiting = twin.waiting,
-            tapCount = tapCount,
-            sent = sentFlash,
-            fmt = fmt,
-            onAdd = onAdd,
-            modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
-        )
     }
 }
 
@@ -564,6 +629,8 @@ private fun Bars(rssi: Int) {
 }
 
 /** The stage's foot: what the tap is about to send, or the last thing that happened; the gesture key under it. */
+private class FootLine(val text: String, val dot: Color?, val action: String? = null, val act: (() -> Unit)? = null)
+
 @Composable
 private fun Foot(
     beacon: Beacon?,
@@ -571,39 +638,53 @@ private fun Foot(
     events: List<Event>,
     waiting: Int,
     tapCount: Int,
+    pending: Mood?,
     sent: Mood?,
     fmt: Format,
     onAdd: () -> Unit,
+    onSend: (Mood) -> Unit,
+    onCancel: () -> Unit,
+    onBattery: (() -> Unit)?,
+    onReplay: (() -> Unit)?,
     modifier: Modifier,
 ) {
     val now = System.currentTimeMillis()
     val light = Stage.light
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        val line: Pair<String, Color?> = when {
-            tapCount > 0 -> "${label(moodOf(tapCount))}…" to moodColor(moodOf(tapCount), light)
-            sent != null -> "${label(sent)} sent" to moodColor(sent, light)
-            beacon == null -> "No beacon yet. A tap still sends a Heart." to null
-            server == ServerLink.OFFLINE -> "This phone is offline. Moods wait and go out after." to null
-            server == ServerLink.CONNECTING -> "Connecting. Moods wait and go out after." to null
-            waiting > 0 -> "$waiting waiting. They play when it wakes." to null
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val line: FootLine = when {
+            tapCount > 0 -> FootLine("${label(moodOf(tapCount))}…", moodColor(moodOf(tapCount), light))
+            pending != null -> FootLine("Sending your ${label(pending)}", moodColor(pending, light), "Cancel", onCancel)
+            sent != null -> FootLine("${label(sent)} sent", moodColor(sent, light))
+            beacon == null -> FootLine("No beacon yet. A tap still sends a Heart.", null)
+            server == ServerLink.OFFLINE -> FootLine("This phone is offline. Moods wait and go out when it is back.", null)
+            server == ServerLink.CONNECTING -> FootLine("Connecting. Moods wait and go out when it connects.", null)
+            waiting > 0 -> FootLine("$waiting waiting. They play when it wakes.", null)
             else -> events.firstOrNull()?.let { e ->
                 val mark = e.mark?.let { " · ${fmt.mark(it)}" }.orEmpty()
-                "${fmt.event(e.mood, e.from)} · ${fmt.ago(e.atEpochMs, now)}$mark" to (if (e.mark == Mark.SHOWN || e.from != null) moodColor(e.mood, light) else null)
-            } ?: ("Nothing yet" to null)
+                FootLine(
+                    "${fmt.event(e.mood, e.from)} · ${fmt.ago(e.atEpochMs, now)}$mark",
+                    if (e.mark == Mark.SHOWN || e.from != null) moodColor(e.mood, light) else null,
+                    onReplay?.let { "Play again" }, onReplay,
+                )
+            } ?: FootLine("Nothing yet", null)
         }
         AnimatedContent(
             line,
+            contentKey = { it.text to it.action },
             transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(120)) },
             label = "foot",
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-        ) { (text, dot) ->
-            // Full width, so a change of line never animates (and clips) the row's size.
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (dot != null) {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(dot))
+        ) { l ->
+            // Full width and one height, so a change of line never animates (and clips) the row's size.
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (l.dot != null) {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(l.dot))
                     Spacer(Modifier.width(10.dp))
                 }
-                Text(text, style = MaterialTheme.typography.titleSmall, color = Stage.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(l.text, style = MaterialTheme.typography.titleSmall, color = Stage.text, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                if (l.action != null && l.act != null) {
+                    TextButton(onClick = l.act, colors = ButtonDefaults.textButtonColors(contentColor = Stage.brassInk)) { Text(l.action) }
+                }
             }
         }
         if (beacon == null) {
@@ -613,26 +694,23 @@ private fun Foot(
                 modifier = Modifier.height(48.dp),
             ) { Text("Add beacon") }
         } else {
-            GestureKey(tapCount)
+            GestureKey(tapCount, pending, onSend, onBattery)
         }
     }
 }
 
-/** The button's language, drawn: one, two, three taps and a hold. The one being tapped lights in its mood's colour. */
+/**
+ * The button's language as buttons: one, two, three dots send a Heart, a Sorry, an Annoy, as that many taps on the
+ * heart do; the bar shows the battery, as a hold does. The one being tapped or sent lights in its mood's colour.
+ */
 @Composable
-private fun GestureKey(tapCount: Int) {
-    FlowRow(
-        Modifier.clearAndSetSemantics {
-            contentDescription = "Tap the heart once for a Heart, twice for Sorry, three times for Annoy. Hold for the battery."
-        },
-        horizontalArrangement = Arrangement.spacedBy(18.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
+private fun GestureKey(tapCount: Int, pending: Mood?, send: (Mood) -> Unit, battery: (() -> Unit)?) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         for (m in Mood.entries) {
             val n = m.ordinal + 1
-            val on by animateFloatAsState(if (tapCount == n) 1f else 0f, tween(140), label = "key")
+            val on by animateFloatAsState(if (tapCount == n || pending == m) 1f else 0f, tween(140), label = "key")
             val c = lerp(Stage.label, moodColor(m, Stage.light), on)
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Key("Send ${article(m)}", lerp(Stage.pipOff, c, on), onClick = { send(m) }) {
                 repeat(n) {
                     Box(Modifier.padding(end = 3.dp).size(6.dp).clip(CircleShape).background(c))
                 }
@@ -640,12 +718,30 @@ private fun GestureKey(tapCount: Int) {
                 Text(label(m), style = MaterialTheme.typography.bodySmall, color = lerp(Stage.text2, Stage.text, on))
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(width = 16.dp, height = 6.dp).clip(CircleShape).background(Stage.label))
-            Spacer(Modifier.width(7.dp))
-            Text("Battery", style = MaterialTheme.typography.bodySmall, color = Stage.text2)
+        if (battery != null) {
+            Key("Show the battery", Stage.pipOff, onClick = battery) {
+                Box(Modifier.size(width = 16.dp, height = 6.dp).clip(CircleShape).background(Stage.label))
+                Spacer(Modifier.width(7.dp))
+                Text("Battery", style = MaterialTheme.typography.bodySmall, color = Stage.text2)
+            }
         }
     }
+}
+
+/** One key: a thin ring on the cloth, a full 48dp to touch. */
+@Composable
+private fun Key(action: String, ring: Color, onClick: () -> Unit, content: @Composable RowScope.() -> Unit) {
+    Row(
+        Modifier
+            .minimumInteractiveComponentSize()
+            .clip(CircleShape)
+            .border(1.dp, ring, CircleShape)
+            .clickable(role = Role.Button, onClickLabel = action, onClick = onClick)
+            .clearAndSetSemantics { contentDescription = action; role = Role.Button }
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
 }
 
 private fun lerp(a: Color, b: Color, t: Float) = androidx.compose.ui.graphics.lerp(a, b, t)
@@ -653,3 +749,5 @@ private fun lerp(a: Color, b: Color, t: Float) = androidx.compose.ui.graphics.le
 private fun moodOf(n: Int) = when (n) { 1 -> Mood.HEART; 2 -> Mood.SORRY; else -> Mood.ANNOY }
 
 private fun label(m: Mood) = when (m) { Mood.HEART -> "Heart"; Mood.SORRY -> "Sorry"; Mood.ANNOY -> "Annoy" }
+
+private fun article(m: Mood) = when (m) { Mood.HEART -> "a Heart"; Mood.SORRY -> "a Sorry"; Mood.ANNOY -> "an Annoy" }

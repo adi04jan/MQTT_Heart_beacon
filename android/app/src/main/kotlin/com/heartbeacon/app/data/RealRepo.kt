@@ -10,6 +10,7 @@ import com.heartbeacon.core.Ids
 import com.heartbeacon.core.Msg
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
@@ -223,25 +224,28 @@ class RealRepo(
         link?.sendMood(mood.wire, id)
     }
 
-    override fun update(s: DeviceSettings) {
-        val d = did ?: return
-        val api = api ?: return
+    override suspend fun update(s: DeviceSettings): String? {
+        val d = did ?: return NO_BEACON
+        val api = api ?: return userMessage(ApiError(401, "login"))
         val old = settings.value
         settings.value = s
         beacon.update { it?.copy(name = s.name.ifBlank { d }) }
-        scope.launch {
+        // In the repo's scope, so leaving the screen never cuts a save in half.
+        return scope.async {
             try {
                 val cfg = api.saveSettings(d, settingsBody(s, raw?.let(::napMinOf)))
                 fwTarget = fwTargetOf(cfg) ?: fwTarget
                 link?.request("cfg", cfgBody(cfg)) // over BLE when near; the router's retained copy covers WiFi
+                null
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 settings.value = old
                 beacon.update { it?.copy(name = old?.name?.ifBlank { d } ?: it.name) }
                 failed(e)
+                userMessage(e)
             }
-        }
+        }.await()
     }
 
     // ---- beacon over BLE ----------------------------------------------------------------
@@ -284,10 +288,14 @@ class RealRepo(
         return null
     }
 
-    override fun forgetWifi(ssid: String) {
+    override suspend fun forgetWifi(ssid: String): String? {
+        val r = link?.request("wifi.forget", buildJsonObject { put("ssid", ssid) }) ?: return NO_BEACON
+        if ((r.body["ok"] as? JsonPrimitive)?.booleanOrNull == false) {
+            return "It could not forget ${ssid}: ${(r.body["err"] as? JsonPrimitive)?.contentOrNull ?: "no reason given"}."
+        }
         wifi = wifi - ssid
         settings.update { it?.copy(wifi = wifi) }
-        scope.launch { link?.request("wifi.forget", buildJsonObject { put("ssid", ssid) }) }
+        return null
     }
 
     /**
@@ -355,6 +363,6 @@ class RealRepo(
         private const val PAIR_MS = 60_000L // bonding includes the system "Pair?" prompt
         private const val SCAN_MS = 20_000L
         private const val JOIN_MS = 30_000L
-        private const val NO_BEACON = "Your beacon did not answer over Bluetooth. Keep it close and try again."
+        const val NO_BEACON = "Your beacon did not answer over Bluetooth. Keep it close and try again."
     }
 }

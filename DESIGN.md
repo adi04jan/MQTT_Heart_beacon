@@ -2,7 +2,7 @@
 name: Heart Beacon
 description: The Android companion of a hand-soldered brass heart; made of what the beacon is made of.
 colors:
-  brass: "#B98E2B"
+  brass: "#A57C1F"
   brass-ink: "#765710"
   on-brass: "#231700"
   brass-bright: "#E2BC6A"
@@ -141,10 +141,11 @@ Nothing moves at rest. The stage draws a frame only while an LED effect, a gestu
 Two metals and a cloth, plus the light the LEDs give.
 
 ### Primary
-- **Brass** (#B98E2B on tin, #E2BC6A on felt and on the stage), with dark lettering (#231700) on it: the fill of
-  main buttons, switches that are on, the slider, chosen day toggles, the awake span of the day bar, the step bars.
-- **Brass ink** (#765710 on tin; the bright brass on felt): brass as text and icons, for text buttons and the add
-  mark, where a fill colour would not have the contrast. Nothing that cannot be pressed or is not a selection is
+- **Brass** (#A57C1F on tin and on the lilac stage, #E2BC6A on felt and on the aubergine stage), with dark lettering
+  (#231700, 4.6:1) on it: the fill of main buttons, switches that are on, the slider, chosen day toggles, the awake
+  span of the day bar, the step bars. On tin plate it holds 3.6:1, so a fill reads as a shape on its own.
+- **Brass ink** (#765710 on tin, #684C0D on the lilac stage; the bright brass on felt): brass as text and icons, for
+  text buttons and the add mark, where a fill colour would not have the contrast. Nothing that cannot be pressed or is not a selection is
   brass.
 
 ### Neutral
@@ -158,6 +159,7 @@ Two metals and a cloth, plus the light the LEDs give.
 - **Stage, light** (lilac cloth: #D5CADB lifting to about #F6EBFD under the pool, finer grain): text #1E1722, soft
   text #4C4352, labels #5D5363, unlit pips #BFB3C6, warnings #B3261E; mood marks use the on-tin mood colours. The
   cage's far side fades into the cloth instead of darkening, and LED light is laid over the cloth instead of added.
+  Asleep, the cage dims part way, cools and thins into the cloth, so it reads apart from awake as clearly as on felt.
 
 ### LED colours (data, not decoration)
 - **Heart** 250,0,0 (drawn #FA343C as a mark on the stage, #C81E2B on tin), **Sorry** 235,161,23 (#B85C00 on tin, kept apart from brass),
@@ -195,11 +197,12 @@ One column, phone first. Screen gutter 16dp; plates sit inside it and pad their 
 Add beacon) use 24dp. Spacing steps are 4, 8, 12, 16, 24, 32dp: tight inside a plate, 28dp above a section heading
 and 8dp below it.
 
-Home is a single scroll: the stage at 66% of the height with its bottom corners rounded 28dp, then one plate per
-settings section, then Recent. The dashboard is a 164dp column over the cage's left lobe; the cage is centred at 60%
-of the width. Once the stage scrolls away, a standard top bar with the beacon's name pins. Every touch target is at
-least 48dp. Layout holds at font scale 1.3: readings wrap rather than clip, and the gesture key flows to a second
-line when it has to.
+Home is a single scroll: the stage at 66% of the height with its bottom corners rounded 28dp, then Recent right under
+it, then one plate per settings section. A vertical swipe anywhere scrolls; on the stage only a sideways drag turns the
+cage. The stage stacks its name bar, the dashboard and the foot in one column, the dashboard (a 164dp column over the
+cage's left lobe) centred in the space between, so they never overlap; the cage is centred at 60% of the width. Once
+the stage scrolls away, a standard top bar with the beacon's name pins. Every touch target is at least 48dp. Layout
+holds at font scale 1.3 with the gesture keys on one line; past that they flow to a second.
 
 ## Elevation & Depth
 
@@ -242,17 +245,28 @@ The beacon on felt: `CageRenderer` draws `Cage`'s tested geometry as brass rods 
 beads of uneven size (about 1.4 rod widths in radius, one smooth dome with a wet point of light) drawn over the
 rod ends so the rods run into the tin, the battery block, board, USB-C socket, button, LED packages
 and copper chain wire. LED frames come from `Fx` through `Twin`, so colours and timings are the firmware's. Tap,
-double tap, triple tap and hold mirror the physical button; drag turns the cage with inertia and it settles back. A
-sent mood leaves as a heart-shaped wave in its colour and never lights the user's own LEDs. Asleep is dim and cool;
-offline is a desaturated ghost.
+double tap, triple tap and hold mirror the physical button; a sideways drag turns the cage with inertia and it settles
+back. A mood waits 1.5 s at the foot ("Sending your Heart", Cancel) before it goes out, so a stray poke can be taken
+back; a newer one sends the waiting one at once. A sent mood leaves as a heart-shaped wave in its colour and never
+lights the user's own LEDs. The newest mood from the other side plays once when the app opens, if the beacon is up
+(it came while the app was closed, the usual case); the foot says when it came and offers Play again. Asleep is dim
+and cool; offline is a desaturated ghost.
 
 ### Dashboard readouts
 A small label, then a Jost reading, then at most one supporting line. Battery is a large figure with 9 pips in the
 battery bar's own colours; Wi-Fi strength is four rising bars. Stale values say so ("Last known") and dim.
 
-### Gesture key
-One, two and three dots and a bar, labelled Heart, Sorry, Annoy, Battery. The entry being tapped lights in its
-mood's colour. The same dot counts, in the mood's colour on a quiet disc, mark each row of Recent.
+### Gesture keys
+One, two and three dots and a bar, labelled Heart, Sorry, Annoy, Battery, each a key with a thin ring on the cloth
+(48dp to touch): the dots send that mood as that many taps on the heart do, the bar plays the battery as a hold does.
+The key being tapped or waiting to send lights its ring and dots in its mood's colour. The same dot counts, in the
+mood's colour on a quiet disc, mark each row of Recent; a delivery mark ("Shown") is a fact, in soft ink, not brass.
+
+### Settings that cannot land yet
+Settings save at once and say so plainly when they fail (a snackbar: "Not saved." with the reason and Retry; the
+control goes back). While the beacon sleeps or is offline, a line under the first heading says changes reach it when
+it wakes. Wi-Fi goes to the beacon over Bluetooth only, so Forget and Add network wait for the phone to be near, and
+Forget asks first.
 
 ### Day plan
 A midnight-to-midnight bar with the awake hours filled in brass, ticks at 6, 12 and 18 hours, the two times beneath

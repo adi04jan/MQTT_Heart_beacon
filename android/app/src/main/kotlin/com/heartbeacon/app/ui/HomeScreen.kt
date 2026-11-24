@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -35,10 +36,15 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,29 +58,42 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.heartbeacon.app.data.Beacon
 import com.heartbeacon.app.data.DeviceSettings
 import com.heartbeacon.app.data.Event
 import com.heartbeacon.app.data.HeartRepo
 import com.heartbeacon.app.data.Mark
 import com.heartbeacon.app.data.Mood
+import com.heartbeacon.app.data.Presence
 import com.heartbeacon.app.ui.heart.HeartStage
 import com.heartbeacon.app.ui.heart.Stage
+
+/** Something that did not go through, said plainly, with the way to try it again. */
+class Problem(val text: String, val retry: () -> Unit)
 
 class HomeVm(private val repo: HeartRepo) : ViewModel() {
     val beacon = repo.beacon
     val events = repo.events
     val server = repo.server
     val settings = repo.settings
+    var problem by mutableStateOf<Problem?>(null)
+
     fun send(m: Mood) = repo.send(m)
-    fun update(s: DeviceSettings) = repo.update(s)
-    fun forget(ssid: String) = repo.forgetWifi(ssid)
+    fun update(s: DeviceSettings) {
+        viewModelScope.launch { repo.update(s)?.let { problem = Problem("Not saved. $it") { update(s) } } }
+    }
+    fun forget(ssid: String) {
+        viewModelScope.launch { repo.forgetWifi(ssid)?.let { problem = Problem("$ssid is still saved. $it") { forget(ssid) } } }
+    }
     suspend fun join(ssid: String, psk: String) = repo.joinWifi(ssid, psk)
     fun remove() = repo.remove()
 }
 
-/** Home: your beacon's twin on its dark stage, its settings under it, then the recent moods. */
+/** Home: your beacon's twin on its stage, the recent moods right under it, then its settings. */
 @Composable
 fun HomeScreen(vm: HomeVm, onAdd: () -> Unit, onSettings: () -> Unit) {
     val beacon by vm.beacon.collectAsStateWithLifecycle()
@@ -83,6 +102,14 @@ fun HomeScreen(vm: HomeVm, onAdd: () -> Unit, onSettings: () -> Unit) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val fmt = rememberFormat()
     var dialog by remember { mutableStateOf<SettingsDialog?>(null) }
+    var forgetting by remember { mutableStateOf<String?>(null) }
+    val snack = remember { SnackbarHostState() }
+    LaunchedEffect(vm.problem) {
+        val p = vm.problem ?: return@LaunchedEffect
+        val r = snack.showSnackbar(p.text, actionLabel = "Retry", withDismissAction = true, duration = SnackbarDuration.Long)
+        vm.problem = null
+        if (r == SnackbarResult.ActionPerformed) p.retry()
+    }
     val list = rememberLazyListState()
     val cs = MaterialTheme.colorScheme
     val title = beacon?.name ?: "Heart Beacon"
@@ -115,9 +142,6 @@ fun HomeScreen(vm: HomeVm, onAdd: () -> Unit, onSettings: () -> Unit) {
                         .clip(RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp)),
                 ) { StageBar(title, beacon?.did, onSettings) }
             }
-            val cur = settings
-            if (beacon != null && cur != null) beaconSettings(cur, fmt, vm::update, vm::forget) { dialog = it }
-
             item { SectionTitle("Recent") }
             if (events.isEmpty()) {
                 item {
@@ -140,6 +164,12 @@ fun HomeScreen(vm: HomeVm, onAdd: () -> Unit, onSettings: () -> Unit) {
                     }
                 }
             }
+
+            val b = beacon
+            val cur = settings
+            if (b != null && cur != null) {
+                beaconSettings(cur, fmt, settingsNote(b, fmt), b.presence == Presence.Near, vm::update, { forgetting = it }) { dialog = it }
+            }
         }
 
         // Once the stage starts to leave and until the bar pins, keep its ground under the status bar, so the
@@ -159,8 +189,19 @@ fun HomeScreen(vm: HomeVm, onAdd: () -> Unit, onSettings: () -> Unit) {
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.surfaceContainer),
             )
         }
+
+        SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
     }
     settings?.let { SettingsDialogs(dialog, it, vm::update, vm::join, vm::remove) { dialog = null } }
+    forgetting?.let { ssid -> ForgetDialog(ssid, title, close = { forgetting = null }) { vm.forget(ssid) } }
+}
+
+/** When the beacon is not up, settings still save now; this says when they reach it. */
+private fun settingsNote(b: Beacon, fmt: Format): String? = when (val p = b.presence) {
+    is Presence.Asleep -> "${b.name} is asleep. Changes are saved now and reach it when it wakes" +
+        (p.untilEpochMs?.let { " at ${fmt.clock(it)}." } ?: ".")
+    Presence.Offline -> "${b.name} is offline. Changes are saved now and reach it when it is back."
+    else -> null
 }
 
 /** The stage's own bar: the beacon's name and did on the dark ground, app settings at the end. */
@@ -203,7 +244,7 @@ private fun EventRow(e: Event, fmt: Format) {
 private fun MarkLabel(m: Mark, fmt: Format) {
     val cs = MaterialTheme.colorScheme
     val color: Color = when (m) {
-        Mark.SHOWN -> cs.primary
+        Mark.SHOWN -> cs.onSurfaceVariant // a fact, not a control: brass is for what you can press
         Mark.QUEUED -> cs.onSurfaceVariant
         Mark.EXPIRED -> cs.error
     }

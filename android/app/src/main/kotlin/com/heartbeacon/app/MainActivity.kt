@@ -16,7 +16,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.toMutableStateList
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -42,6 +45,11 @@ import kotlinx.coroutines.launch
 enum class Route { HOME, ADD, SETTINGS }
 
 private class Entry(val route: Route, val n: Int)
+
+private val StackSaver = listSaver<SnapshotStateList<Entry>, Int>(
+    save = { s -> s.flatMap { listOf(it.route.ordinal, it.n) } },
+    restore = { l -> l.chunked(2).map { Entry(Route.entries[it[0]], it[1]) }.toMutableStateList() },
+)
 
 class MainActivity : ComponentActivity() {
     private var pairing: AddDeviceVm? = null
@@ -123,8 +131,9 @@ private fun AppRoot(app: App, start: Route, addStep: Int, find: (AddDeviceVm) ->
         LoginScreen(viewModel { LoginVm(repo) })
         return
     }
-    var next by remember { mutableIntStateOf(1) }
-    val stack = remember {
+    // Saved, so a resize or a process restart keeps the screen you were on (and each Add keeps its own view model).
+    var next by rememberSaveable { mutableIntStateOf(1) }
+    val stack = rememberSaveable(saver = StackSaver) {
         mutableStateListOf(Entry(Route.HOME, 0)).apply { if (start != Route.HOME) add(Entry(start, 1)) }
     }
     fun push(r: Route) = stack.add(Entry(r, ++next))

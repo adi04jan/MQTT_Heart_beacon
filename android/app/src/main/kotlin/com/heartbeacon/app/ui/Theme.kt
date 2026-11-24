@@ -140,7 +140,7 @@ private val Shape = Shapes(
  * day): real brass with dark lettering on tin, the scheme's own bright brass on felt. The scheme's darker primary
  * stays for brass text and icons, which need the contrast.
  */
-val ColorScheme.brass: Color get() = if (surface.luminance() > 0.5f) Color(0xFFB98E2B) else primary
+val ColorScheme.brass: Color get() = if (surface.luminance() > 0.5f) Color(0xFFA57C1F) else primary
 val ColorScheme.onBrass: Color get() = if (surface.luminance() > 0.5f) Color(0xFF231700) else onPrimary
 
 @Composable

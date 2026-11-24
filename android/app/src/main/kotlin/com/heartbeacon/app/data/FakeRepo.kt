@@ -83,9 +83,14 @@ class FakeRepo(
         }
     }
 
-    override fun update(s: DeviceSettings) {
+    override suspend fun update(s: DeviceSettings): String? {
+        val old = settings.value
         settings.value = s
         beacon.update { it?.copy(name = s.name) }
+        fail ?: return null
+        delay(700)
+        settings.value = old
+        return userMessage(fail)
     }
 
     override suspend fun pair(mac: String?): String? {
@@ -110,8 +115,11 @@ class FakeRepo(
         return null
     }
 
-    override fun forgetWifi(ssid: String) {
+    override suspend fun forgetWifi(ssid: String): String? {
+        delay(500)
+        if (beacon.value?.presence != Presence.Near) return RealRepo.NO_BEACON
         settings.update { it?.copy(wifi = it.wifi - ssid) }
+        return null
     }
 
     override suspend fun claim(did: String, name: String): String? {

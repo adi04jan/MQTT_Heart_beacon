@@ -24,7 +24,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -64,10 +63,15 @@ import java.time.LocalTime
 /** Which settings dialog is open. */
 enum class SettingsDialog { NAME, WIFI, START, STOP, REMOVE }
 
-/** The beacon's settings, one plate per section, for the Home list under the heart. */
+/**
+ * The beacon's settings, one plate per section, for the Home list under the heart. [note] says when changes reach a
+ * beacon that is not up; Wi-Fi changes go over Bluetooth only, so they wait for the phone to be [near].
+ */
 fun LazyListScope.beaconSettings(
     cur: DeviceSettings,
     fmt: Format,
+    note: String?,
+    near: Boolean,
     update: (DeviceSettings) -> Unit,
     forget: (String) -> Unit,
     open: (SettingsDialog) -> Unit,
@@ -76,6 +80,7 @@ fun LazyListScope.beaconSettings(
     val stop = LocalTime.parse(cur.stop)
 
     item { SectionTitle("Auto on and off") }
+    note?.let { item { Note(it) } }
     item {
         Group {
             SwitchRow(
@@ -107,13 +112,21 @@ fun LazyListScope.beaconSettings(
     item {
         Group {
             cur.wifi.forEach { ssid ->
-                ItemRow(ssid, "Saved on the beacon", trailing = { TextButton(onClick = { forget(ssid) }) { Text("Forget") } })
+                ItemRow(ssid, "Saved on the beacon", trailing = {
+                    TextButton(onClick = { forget(ssid) }, enabled = near, modifier = Modifier.semantics { contentDescription = "Forget $ssid" }) {
+                        Text("Forget")
+                    }
+                })
                 Line()
             }
             if (cur.wifi.size < 4) {
-                ItemRow("Add network", onClick = { open(SettingsDialog.WIFI) }, trailing = {
-                    VectorIcon(Icons.Filled.Add, MaterialTheme.colorScheme.primary, 22.dp)
-                })
+                val cs = MaterialTheme.colorScheme
+                ItemRow(
+                    "Add network",
+                    if (near) null else "Bring your phone near ${cur.name} first",
+                    onClick = if (near) ({ open(SettingsDialog.WIFI) }) else null,
+                    trailing = { VectorIcon(Icons.Filled.Add, if (near) cs.primary else cs.onSurface.copy(alpha = 0.38f), 22.dp) },
+                )
                 Line()
             }
             SwitchRow(
@@ -131,8 +144,7 @@ fun LazyListScope.beaconSettings(
             Line()
             ItemRow(
                 if (cur.fw.isEmpty()) "Version not reported yet" else "Version ${cur.fw}",
-                cur.fwAvailable?.let { "$it is ready. Installs over Wi-Fi with at least 70% battery." } ?: "Up to date",
-                trailing = cur.fwAvailable?.let { { FilledTonalButton(onClick = {}) { Text("Update") } } },
+                cur.fwAvailable?.let { "$it is ready. It installs itself over Wi-Fi with at least 70% battery." } ?: "Up to date",
             )
         }
     }
@@ -144,6 +156,25 @@ fun LazyListScope.beaconSettings(
         ) { Text("Remove beacon") }
     }
 }
+
+/** Asks before a network is dropped from the beacon; it can only be added back with its password. */
+@Composable
+fun ForgetDialog(ssid: String, beacon: String, close: () -> Unit, forget: () -> Unit) = AlertDialog(
+    onDismissRequest = close,
+    title = { Text("Forget $ssid?") },
+    text = { Text("$beacon stops joining it. To add it back you need its password.") },
+    confirmButton = { TextButton(onClick = { forget(); close() }) { Text("Forget") } },
+    dismissButton = { TextButton(onClick = close) { Text("Cancel") } },
+)
+
+/** A quiet line under a section heading: how the section behaves right now. */
+@Composable
+private fun Note(text: String) = Text(
+    text,
+    style = MaterialTheme.typography.bodyMedium,
+    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    modifier = Modifier.padding(start = Space.screen + Space.s, end = Space.screen + Space.s, bottom = Space.m),
+)
 
 /** The open settings dialog, if any. */
 @Composable

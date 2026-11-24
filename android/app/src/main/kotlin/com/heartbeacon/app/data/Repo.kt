@@ -75,14 +75,16 @@ interface HeartRepo {
     suspend fun login(user: String, pass: String, host: String): String?
     fun logout()
     fun send(mood: Mood)
-    fun update(s: DeviceSettings)
+    /** Shows [s] at once; null once the server has it, else what to tell the user (the old settings are back). */
+    suspend fun update(s: DeviceSettings): String?
 
     /** After the CDM chooser: bond, `get info`; returns the beacon's did, or null when pairing failed. */
     suspend fun pair(mac: String?): String?
     suspend fun scanWifi(): List<WifiNet>
     /** Null when the beacon joined, else the beacon's reason. */
     suspend fun joinWifi(ssid: String, psk: String): String?
-    fun forgetWifi(ssid: String)
+    /** Null once the beacon has dropped [ssid] (over BLE), else what to tell the user. */
+    suspend fun forgetWifi(ssid: String): String?
     /** Null when the beacon is on the account and has its credentials, else what to tell the user. */
     suspend fun claim(did: String, name: String): String?
     fun remove()
