@@ -59,8 +59,8 @@ data class DeviceSettings(
 data class WifiNet(val ssid: String, val rssi: Int, val secure: Boolean)
 
 /**
- * Everything the screens need. [FakeRepo] renders the UI today; the real one sits on the link
- * service, the router API and DataStore (M5/M6).
+ * Everything the screens need. [RealRepo] runs the app; [FakeRepo] renders previews, tests and the
+ * debug screenshot scenarios.
  */
 interface HeartRepo {
     val session: StateFlow<Session?>
@@ -81,6 +81,7 @@ interface HeartRepo {
     /** Null when the beacon joined, else the beacon's reason. */
     suspend fun joinWifi(ssid: String, psk: String): String?
     fun forgetWifi(ssid: String)
-    suspend fun claim(did: String, name: String)
+    /** Null when the beacon is on the account and has its credentials, else what to tell the user. */
+    suspend fun claim(did: String, name: String): String?
     fun remove()
 }

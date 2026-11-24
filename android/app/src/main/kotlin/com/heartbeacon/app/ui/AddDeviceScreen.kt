@@ -76,6 +76,10 @@ class AddDeviceVm(private val repo: HeartRepo, start: Int) : ViewModel() {
     var joinError by mutableStateOf<String?>(null)
         private set
     var name by mutableStateOf("Desk")
+    var claiming by mutableStateOf(false)
+        private set
+    var claimError by mutableStateOf<String?>(null)
+        private set
 
     init {
         if (start >= WIFI) {
@@ -122,9 +126,13 @@ class AddDeviceVm(private val repo: HeartRepo, start: Int) : ViewModel() {
     }
 
     fun finish(done: () -> Unit) {
+        val d = did ?: return
+        claiming = true
+        claimError = null
         viewModelScope.launch {
-            repo.claim(did ?: return@launch, name.trim())
-            done()
+            claimError = repo.claim(d, name.trim())
+            claiming = false
+            if (claimError == null) done()
         }
     }
 

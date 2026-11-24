@@ -20,8 +20,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.heartbeacon.app.data.ApiError
 import com.heartbeacon.app.data.FakeRepo
 import com.heartbeacon.app.data.Presence
+import com.heartbeacon.app.data.RealRepo
+import com.heartbeacon.app.data.ServerLink
 import com.heartbeacon.app.link.BeaconService
 import com.heartbeacon.app.link.Cdm
 import com.heartbeacon.app.ui.AddDeviceScreen
@@ -53,7 +56,8 @@ class MainActivity : ComponentActivity() {
         val app = application as App
         var start = Route.HOME
         var step = 0
-        // Debug-only entry points for screenshots: --es screen home|add|device|settings --ei step N --es status ...
+        // Debug-only switch to FakeRepo for screenshots: --es screen login|home|add|device|settings --ei step N
+        // --es status near|away|asleep|offline --es server offline|connecting --es fail 401|403|409|429|net|tls
         if (BuildConfig.DEBUG && savedInstanceState == null && intent.hasExtra("screen")) {
             val screen = intent.getStringExtra("screen")
             start = Route.entries.firstOrNull { it.name.equals(screen, ignoreCase = true) } ?: Route.HOME
@@ -66,7 +70,18 @@ class MainActivity : ComponentActivity() {
                 "offline" -> Presence.Offline
                 else -> Presence.Near
             }
-            app.repo = FakeRepo(app.scope, presence, loggedIn = screen != "login")
+            val link = ServerLink.entries.firstOrNull { it.name.equals(intent.getStringExtra("server"), ignoreCase = true) }
+            val fail = when (intent.getStringExtra("fail")) {
+                "401" -> ApiError(401, "bad_login")
+                "403" -> ApiError(403, "not_assigned")
+                "409" -> ApiError(409, "claimed")
+                "429" -> ApiError(429, "slow_down", 42)
+                "net" -> java.net.ConnectException("refused")
+                "tls" -> javax.net.ssl.SSLHandshakeException("not our CA")
+                else -> null
+            }
+            (app.repo as? RealRepo)?.close()
+            app.repo = FakeRepo(app.scope, presence, loggedIn = screen != "login", link = link ?: ServerLink.CONNECTED, fail = fail)
         }
         BeaconService.start(this)
         setContent { HeartTheme { AppRoot(app, start, step, ::findBeacon) } }
