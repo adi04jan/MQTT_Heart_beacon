@@ -81,7 +81,9 @@ Tick a box only after its bench check passed.
 - [x] Deploy kit: `install.sh` (dry run by default, `--apply`, refuses to touch the shared broker, no root writes in hb-owned dirs), `uninstall.sh`, `hb-admin`, `RUNBOOK.md`; local e2e `smoke.py` SMOKE PASS 15/15 (lead-verified 2026-11-24)
 - [x] Deployed on the ThinkCentre 2026-11-24 (2d20277): `hb-mosquitto` + `hb-server` enabled, shared broker / bridge / logger untouched (same start time), CA key moved off-box, smoke users + `HB-000001` registered; smoke.py 15/15 PASS through an ssh tunnel (TLS still verified against the public IP)
 - [x] Router forwards TCP 8883 and 8443 to the server (live 2026-11-24; 8444 and 1884 closed from outside)
-- [ ] Real users + beacons in `hb-admin` (needs: both users' uid + display name, the other beacon's did)
+- [x] Real users `aditya` (Aditya) and `bulbul` (BulBul), circle `home`; both log in over the public IP (2026-11-24)
+- [x] COM6 beacon `HB-756268` registered to `aditya`
+- [ ] Other beacon: register its did to `bulbul` (needs its MAC)
 - [x] Bench: smoke.py from outside the LAN (office) against the public IP: SMOKE PASS 15/15 (2026-11-24)
 
 ### M3 firmware WiFi + MQTT

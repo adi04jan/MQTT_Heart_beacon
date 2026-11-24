@@ -211,7 +211,8 @@ Deployed 2026-11-24 from `2d20277` (`deploy/RUNBOOK.md`). Server access from thi
 (key auth, passwordless `sudo -n`); the source tree it was installed from is `~/hb-src` there (re-run
 `install.sh --apply <IP>` from a fresh `git archive HEAD server deploy` to update). The CA private key lives only on
 the dev PC in `%USERPROFILE%\hb-pki-backup` with the smoke users' passwords. Router forwards 8883/8443 are live
-(smoke.py passes from the office). Still to do: `age` for encrypted backups, real users and beacons. The `health_dash` session knows the box (other services,
+(smoke.py passes from the office). Still to do: `age` for encrypted backups, the other beacon's did (to `bulbul`). Users: `aditya` (owns COM6's `HB-756268`),
+`bulbul`; app passwords in the same backup folder. The `health_dash` session knows the box (other services,
 cron, pump rules); leave the shared `mosquitto`, `telegram_heart` and `mqtt-payload-log` alone.
 
 ## Bridge service (server)
