@@ -46,7 +46,7 @@ mqtt_listener() {
     echo "[INFO] Starting MQTT -> Telegram bridge..."
     echo "[INFO] Listening to topic: $MQTT_TOPIC"
     mosquitto_sub -h "$MQTT_BROKER" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" \
-        -t "$MQTT_TOPIC" | while IFS= read -r payload; do
+        -R -t "$MQTT_TOPIC" | while IFS= read -r payload; do
         echo "[MQTT] Received: $payload"
         chip_id=$(echo "$payload" | jq -r '.id // empty')
         msg=$(echo "$payload" | jq -r '.message // empty')

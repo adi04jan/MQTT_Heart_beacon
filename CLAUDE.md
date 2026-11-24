@@ -211,8 +211,8 @@ Deployed 2026-11-24 from `2d20277` (`deploy/RUNBOOK.md`). Server access from thi
 (key auth, passwordless `sudo -n`); the source tree it was installed from is `~/hb-src` there (re-run
 `install.sh --apply <IP>` from a fresh `git archive HEAD server deploy` to update). The CA private key lives only on
 the dev PC in `%USERPROFILE%\hb-pki-backup` with the smoke users' passwords. Router forwards 8883/8443 are live
-(smoke.py passes from the office). Still to do: `age` for encrypted backups, the other beacon's did (to `bulbul`). Users: `aditya` (owns COM6's `HB-756268`),
-`bulbul`; app passwords in the same backup folder. The `health_dash` session knows the box (other services,
+(smoke.py passes from the office). Still to do: `age` for encrypted backups, Users: `aditya` (owns COM6's `HB-756268`), `bulbul` (owns
+`HB-4F17E4` = MAC `A0:85:E3:4F:17:E4`, still on v1 0.0.9, not seen on the broker since at least 2026-10-28); app passwords in the same backup folder. The `health_dash` session knows the box (other services,
 cron, pump rules); leave the shared `mosquitto`, `telegram_heart` and `mqtt-payload-log` alone.
 
 ## Bridge service (server)
@@ -221,7 +221,9 @@ cron, pump rules); leave the shared `mosquitto`, `telegram_heart` and `mqtt-payl
 `telegram_poller` (foreground, `getUpdates` long-poll + 10 s sleep). Admin vs. regular users is decided by the
 `USERS` map plus a hard-coded admin ID inside `mqtt_listener`; keep those consistent when editing.
 Forwarding (repo version, 2026-11-24): non-admin users get "❤️ Miss you" only for real hearts (`MQTT_MSG_1`); the
-admin gets every device message except routine `BATT_STATUS` (>= 3.5 V). The deployed copy on the server holds the
+admin gets every device message except routine `BATT_STATUS` (>= 3.5 V). `mosquitto_sub -R` skips the stale
+retained message, which `telegram_heart-restart.timer` (daily at 00:00) otherwise replayed to Telegram every night.
+The deployed copy on the server holds the
 real token and IDs, so apply repo changes to it as a patch, never by overwriting the file. Known defects (bridge
 is retired in v2): any Telegram user can send commands; if the broker restarts, `mosquitto_sub` exits but the
 service stays active, so run `systemctl restart telegram_heart` after a broker restart.

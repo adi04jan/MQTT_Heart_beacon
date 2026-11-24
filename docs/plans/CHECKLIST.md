@@ -83,7 +83,8 @@ Tick a box only after its bench check passed.
 - [x] Router forwards TCP 8883 and 8443 to the server (live 2026-11-24; 8444 and 1884 closed from outside)
 - [x] Real users `aditya` (Aditya) and `bulbul` (BulBul), circle `home`; both log in over the public IP (2026-11-24)
 - [x] COM6 beacon `HB-756268` registered to `aditya`
-- [ ] Other beacon: register its did to `bulbul` (needs its MAC)
+- [x] Other beacon `HB-4F17E4` (MAC `A0:85:E3:4F:17:E4`, from the bridge journal) registered to `bulbul`. It runs 0.0.9 on
+  `Airtel_Mohnish` (-84 dBm) and has not connected since at least 2026-10-28; the OTA server still offers 0.0.9
 - [x] Bench: smoke.py from outside the LAN (office) against the public IP: SMOKE PASS 15/15 (2026-11-24)
 
 ### M3 firmware WiFi + MQTT
