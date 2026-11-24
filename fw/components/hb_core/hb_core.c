@@ -4,6 +4,9 @@
 #include <string.h>
 
 const hb_cfg_t hb_cfg_default = {
+    .n_mqtt = 1,
+    .mqtt = {8883},
+    .api = 8443,
     .bright = 60,
     .sched_on = false,
     .tz_min = 0,
@@ -15,6 +18,17 @@ const hb_cfg_t hb_cfg_default = {
     .batt_low_mv = 3450,
     .batt_off_mv = 3300,
     .batt_cal_ppm = 0,
+    .adv_fast_ms = 100,
+    .adv_fast_s = 30,
+    .adv_slow_ms = 500,
+    .conn_ms = 500,
+    .latency = 3,
+    .sup_ms = 6000,
+    .use_wifi = true,
+    .near_hold_s = 30,
+    .away_grace_s = 60,
+    .tele_min = 30,
+    .fw_min_mv = 3700,
 };
 
 static const hb_fx_kind_t k_mood_fx[] = {
