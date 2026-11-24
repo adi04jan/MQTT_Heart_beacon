@@ -55,3 +55,5 @@ add_executable(test_core test_core.c)
 target_link_libraries(test_core PRIVATE hb_core unity)
 target_compile_options(test_core PRIVATE -Wall -Wextra -Werror)
 add_test(NAME test_core COMMAND test_core)
+
+add_subdirectory(../../sim "${CMAKE_CURRENT_BINARY_DIR}/sim")
