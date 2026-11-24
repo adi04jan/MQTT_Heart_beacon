@@ -135,7 +135,8 @@ class RealRepo(
             "tele" -> {
                 (body["fw"] as? JsonPrimitive)?.contentOrNull?.let { v -> fw = v; settings.update { it?.copy(fw = v) } }
                 val pct = (body["pct"] as? JsonPrimitive)?.intOrNull
-                beacon.update { it?.copy(batteryPct = pct ?: it.batteryPct, lastSeenEpochMs = now) }
+                val rssi = (body["rssi"] as? JsonPrimitive)?.intOrNull
+                beacon.update { it?.copy(batteryPct = pct ?: it.batteryPct, rssi = rssi ?: it.rssi, lastSeenEpochMs = now) }
             }
         }
     }

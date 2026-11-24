@@ -30,6 +30,8 @@ data class Beacon(
     val presence: Presence,
     val batteryPct: Int?,
     val lastSeenEpochMs: Long?,
+    /** Wi-Fi signal from the last `tele`, dBm. */
+    val rssi: Int? = null,
 )
 
 /** Delivery mark on an event the user sent (PROTOCOL `rcpt.st`). Null for events received. */

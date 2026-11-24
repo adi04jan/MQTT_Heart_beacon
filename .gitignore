@@ -11,3 +11,6 @@ android/app/build/
 fw/build/
 fw/sdkconfig
 fw/sdkconfig.old
+
+# impeccable review captures (regenerated per design pass)
+.impeccable/review/

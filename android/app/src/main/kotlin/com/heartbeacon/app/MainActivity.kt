@@ -22,6 +22,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.heartbeacon.app.data.ApiError
 import com.heartbeacon.app.data.FakeRepo
+import com.heartbeacon.app.data.Mood
 import com.heartbeacon.app.data.Presence
 import com.heartbeacon.app.data.RealRepo
 import com.heartbeacon.app.data.ServerLink
@@ -31,15 +32,14 @@ import com.heartbeacon.app.ui.AddDeviceScreen
 import com.heartbeacon.app.ui.AddDeviceVm
 import com.heartbeacon.app.ui.AppSettingsScreen
 import com.heartbeacon.app.ui.AppSettingsVm
-import com.heartbeacon.app.ui.DeviceSettingsScreen
-import com.heartbeacon.app.ui.DeviceSettingsVm
 import com.heartbeacon.app.ui.HeartTheme
 import com.heartbeacon.app.ui.HomeScreen
 import com.heartbeacon.app.ui.HomeVm
 import com.heartbeacon.app.ui.LoginScreen
 import com.heartbeacon.app.ui.LoginVm
+import kotlinx.coroutines.launch
 
-enum class Route { HOME, ADD, DEVICE, SETTINGS }
+enum class Route { HOME, ADD, SETTINGS }
 
 private class Entry(val route: Route, val n: Int)
 
@@ -56,8 +56,9 @@ class MainActivity : ComponentActivity() {
         val app = application as App
         var start = Route.HOME
         var step = 0
-        // Debug-only switch to FakeRepo for screenshots: --es screen login|home|add|device|settings --ei step N
+        // Debug-only switch to FakeRepo for screenshots: --es screen login|home|add|settings --ei step N
         // --es status near|away|asleep|offline --es server offline|connecting --es fail 401|403|409|429|net|tls
+        // --es fx heart|sorry|annoy (a mood from BulBul arrives 2.5 s after start)
         if (BuildConfig.DEBUG && savedInstanceState == null && intent.hasExtra("screen")) {
             val screen = intent.getStringExtra("screen")
             start = Route.entries.firstOrNull { it.name.equals(screen, ignoreCase = true) } ?: Route.HOME
@@ -81,7 +82,14 @@ class MainActivity : ComponentActivity() {
                 else -> null
             }
             (app.repo as? RealRepo)?.close()
-            app.repo = FakeRepo(app.scope, presence, loggedIn = screen != "login", link = link ?: ServerLink.CONNECTED, fail = fail)
+            val fake = FakeRepo(app.scope, presence, loggedIn = screen != "login", link = link ?: ServerLink.CONNECTED, fail = fail)
+            app.repo = fake
+            Mood.entries.firstOrNull { it.wire == intent.getStringExtra("fx") }?.let { m ->
+                app.scope.launch {
+                    kotlinx.coroutines.delay(2_500)
+                    fake.incoming(m)
+                }
+            }
         }
         BeaconService.start(this)
         setContent { HeartTheme { AppRoot(app, start, step, ::findBeacon) } }
@@ -130,7 +138,6 @@ private fun AppRoot(app: App, start: Route, addStep: Int, find: (AddDeviceVm) ->
         when (e.route) {
             Route.HOME -> HomeScreen(
                 viewModel { HomeVm(repo) },
-                onBeacon = { push(Route.DEVICE) },
                 onAdd = { push(Route.ADD) },
                 onSettings = { push(Route.SETTINGS) },
             )
@@ -138,7 +145,6 @@ private fun AppRoot(app: App, start: Route, addStep: Int, find: (AddDeviceVm) ->
                 val vm = viewModel(key = "add-${e.n}") { AddDeviceVm(repo, if (e.n == 1) addStep else 0) }
                 AddDeviceScreen(vm, onFind = { find(vm) }, onBack = ::pop, onDone = ::home)
             }
-            Route.DEVICE -> DeviceSettingsScreen(viewModel { DeviceSettingsVm(repo) }, onBack = ::pop, onRemoved = ::home)
             Route.SETTINGS -> AppSettingsScreen(viewModel { AppSettingsVm(repo, app.settings) }, onBack = ::pop)
         }
     }

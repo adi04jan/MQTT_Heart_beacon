@@ -4,14 +4,12 @@ package com.heartbeacon.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -23,7 +21,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Slider
@@ -45,119 +42,116 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.heartbeacon.app.data.DeviceSettings
-import com.heartbeacon.app.data.HeartRepo
 import java.time.LocalTime
 
-class DeviceSettingsVm(private val repo: HeartRepo) : ViewModel() {
-    val settings = repo.settings
-    fun update(s: DeviceSettings) = repo.update(s)
-    fun forget(ssid: String) = repo.forgetWifi(ssid)
-    suspend fun join(ssid: String, psk: String) = repo.joinWifi(ssid, psk)
-    fun remove() = repo.remove()
-}
+/** Which settings dialog is open. */
+enum class SettingsDialog { NAME, WIFI, START, STOP, REMOVE }
 
-private enum class Dialog { NAME, WIFI, START, STOP, REMOVE }
-
-@Composable
-fun DeviceSettingsScreen(vm: DeviceSettingsVm, onBack: () -> Unit, onRemoved: () -> Unit) {
-    val s by vm.settings.collectAsStateWithLifecycle()
-    val cur = s ?: return
-    var dialog by remember { mutableStateOf<Dialog?>(null) }
-    val fmt = rememberFormat()
+/** The beacon's settings as list rows, for the Home list under the heart. */
+fun LazyListScope.beaconSettings(
+    cur: DeviceSettings,
+    fmt: Format,
+    update: (DeviceSettings) -> Unit,
+    forget: (String) -> Unit,
+    open: (SettingsDialog) -> Unit,
+) {
     fun hhmm(t: String) = fmt.clock(LocalTime.parse(t))
+    item { SectionTitle("Beacon") }
+    item { ItemRow("Name", cur.name, onClick = { open(SettingsDialog.NAME) }) }
 
-    Scaffold(topBar = { BackBar(cur.name, onBack) }) { pad ->
-        LazyColumn(Modifier.fillMaxSize().padding(bottom = pad.calculateBottomPadding()), contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = Space.xxl)) {
-            item {
-                ItemRow("Name", cur.name, onClick = { dialog = Dialog.NAME })
-            }
+    item { SectionTitle("Wi-Fi") }
+    cur.wifi.forEach { ssid ->
+        item(key = "wifi-$ssid") {
+            ItemRow(ssid, "Saved on the beacon", trailing = { TextButton(onClick = { forget(ssid) }) { Text("Forget") } })
+        }
+    }
+    if (cur.wifi.size < 4) {
+        item {
+            ItemRow("Add network", onClick = { open(SettingsDialog.WIFI) }, trailing = {
+                VectorIcon(Icons.Filled.Add, MaterialTheme.colorScheme.onSurfaceVariant, 22.dp)
+            })
+        }
+    }
+    item {
+        SwitchRow(
+            "Use Wi-Fi when your phone is away",
+            "Off keeps the beacon on Bluetooth only. It goes quiet when your phone leaves.",
+            cur.useWifiAway,
+        ) { update(cur.copy(useWifiAway = it)) }
+    }
 
-            item { SectionTitle("Wi-Fi") }
-            cur.wifi.forEach { ssid ->
-                item(key = "wifi-$ssid") {
-                    ItemRow(ssid, "Saved on the beacon", trailing = { TextButton(onClick = { vm.forget(ssid) }) { Text("Forget") } })
-                }
-            }
-            if (cur.wifi.size < 4) {
-                item {
-                    ItemRow("Add network", onClick = { dialog = Dialog.WIFI }, trailing = {
-                        VectorIcon(Icons.Filled.Add, MaterialTheme.colorScheme.onSurfaceVariant, 22.dp)
-                    })
-                }
-            }
-            item {
-                SwitchRow(
-                    "Use Wi-Fi when your phone is away",
-                    "Off keeps the beacon on Bluetooth only. It goes quiet when your phone leaves.",
-                    cur.useWifiAway,
-                ) { vm.update(cur.copy(useWifiAway = it)) }
-            }
-
-            item { SectionTitle("Auto on and off") }
-            item {
-                SwitchRow(
-                    "Sleep outside these hours",
-                    "Hearts sent while it sleeps play when it wakes.",
-                    cur.schedOn,
-                ) { vm.update(cur.copy(schedOn = it)) }
-            }
-            item { Days(cur.days, cur.schedOn) { vm.update(cur.copy(days = it)) } }
-            item {
-                Row {
-                    Column(Modifier.weight(1f)) { ItemRow("Wakes", hhmm(cur.start), onClick = { dialog = Dialog.START }) }
-                    Column(Modifier.weight(1f)) {
-                        ItemRow("Sleeps", fmt.sleeps(LocalTime.parse(cur.start), LocalTime.parse(cur.stop)), onClick = { dialog = Dialog.STOP })
-                    }
-                }
-            }
-
-            item { SectionTitle("Light and power") }
-            item { Brightness(cur.bright) { vm.update(cur.copy(bright = it)) } }
-            item {
-                SwitchRow(
-                    "Nap when idle",
-                    "After 90 minutes with no hearts it naps and checks in every 15 minutes. Saves battery; hearts can take up to 15 minutes.",
-                    cur.napWhenIdle,
-                ) { vm.update(cur.copy(napWhenIdle = it)) }
-            }
-
-            item { SectionTitle("Firmware") }
-            item {
-                ItemRow(
-                    if (cur.fw.isEmpty()) "Version not reported yet" else "Version ${cur.fw}",
-                    cur.fwAvailable?.let { "$it is ready. Installs over Wi-Fi with at least 70% battery." } ?: "Up to date",
-                    trailing = cur.fwAvailable?.let { { FilledTonalButton(onClick = {}) { Text("Update") } } },
-                )
-            }
-
-            item {
-                OutlinedButton(
-                    onClick = { dialog = Dialog.REMOVE },
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                    modifier = Modifier.padding(start = Space.screen, end = Space.screen, top = Space.xxl).fillMaxWidth().height(48.dp),
-                ) { Text("Remove beacon") }
+    item { SectionTitle("Auto on and off") }
+    item {
+        SwitchRow(
+            "Sleep outside these hours",
+            "Hearts sent while it sleeps play when it wakes.",
+            cur.schedOn,
+        ) { update(cur.copy(schedOn = it)) }
+    }
+    item { Days(cur.days, cur.schedOn) { update(cur.copy(days = it)) } }
+    item {
+        Row {
+            Column(Modifier.weight(1f)) { ItemRow("Wakes", hhmm(cur.start), onClick = { open(SettingsDialog.START) }) }
+            Column(Modifier.weight(1f)) {
+                ItemRow("Sleeps", fmt.sleeps(LocalTime.parse(cur.start), LocalTime.parse(cur.stop)), onClick = { open(SettingsDialog.STOP) })
             }
         }
     }
 
+    item { SectionTitle("Light and power") }
+    item { Brightness(cur.bright) { update(cur.copy(bright = it)) } }
+    item {
+        SwitchRow(
+            "Nap when idle",
+            "After 90 minutes with no hearts it naps and checks in every 15 minutes. Saves battery; hearts can take up to 15 minutes.",
+            cur.napWhenIdle,
+        ) { update(cur.copy(napWhenIdle = it)) }
+    }
+
+    item { SectionTitle("Firmware") }
+    item {
+        ItemRow(
+            if (cur.fw.isEmpty()) "Version not reported yet" else "Version ${cur.fw}",
+            cur.fwAvailable?.let { "$it is ready. Installs over Wi-Fi with at least 70% battery." } ?: "Up to date",
+            trailing = cur.fwAvailable?.let { { FilledTonalButton(onClick = {}) { Text("Update") } } },
+        )
+    }
+
+    item {
+        OutlinedButton(
+            onClick = { open(SettingsDialog.REMOVE) },
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            modifier = Modifier.padding(start = Space.screen, end = Space.screen, top = Space.xxl).fillMaxWidth().height(48.dp),
+        ) { Text("Remove beacon") }
+    }
+}
+
+/** The open settings dialog, if any. */
+@Composable
+fun SettingsDialogs(
+    dialog: SettingsDialog?,
+    cur: DeviceSettings,
+    update: (DeviceSettings) -> Unit,
+    join: suspend (String, String) -> String?,
+    remove: () -> Unit,
+    close: () -> Unit,
+) {
     when (dialog) {
-        Dialog.NAME -> NameDialog(cur.name, { dialog = null }) { vm.update(cur.copy(name = it)); dialog = null }
-        Dialog.WIFI -> WifiDialog({ dialog = null }, vm::join)
-        Dialog.START -> TimeDialog("Wakes at", cur.start, { dialog = null }) { vm.update(cur.copy(start = it)); dialog = null }
-        Dialog.STOP -> TimeDialog("Sleeps at", cur.stop, { dialog = null }) { vm.update(cur.copy(stop = it)); dialog = null }
-        Dialog.REMOVE -> AlertDialog(
-            onDismissRequest = { dialog = null },
+        SettingsDialog.NAME -> NameDialog(cur.name, close) { update(cur.copy(name = it)); close() }
+        SettingsDialog.WIFI -> WifiDialog(close, join)
+        SettingsDialog.START -> TimeDialog("Wakes at", cur.start, close) { update(cur.copy(start = it)); close() }
+        SettingsDialog.STOP -> TimeDialog("Sleeps at", cur.stop, close) { update(cur.copy(stop = it)); close() }
+        SettingsDialog.REMOVE -> AlertDialog(
+            onDismissRequest = close,
             title = { Text("Remove ${cur.name}?") },
             text = { Text("It is reset to factory settings and leaves your account. You can add it again later.") },
             confirmButton = {
-                TextButton(onClick = { vm.remove(); dialog = null; onRemoved() }) {
+                TextButton(onClick = { remove(); close() }) {
                     Text("Remove", color = MaterialTheme.colorScheme.error)
                 }
             },
-            dismissButton = { TextButton(onClick = { dialog = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = close) { Text("Cancel") } },
         )
         null -> Unit
     }

@@ -55,6 +55,7 @@ fun beaconOf(d: JsonObject): Beacon {
         presence = Presence.of(d.str("st").orEmpty(), d.long("wake") ?: 0) ?: Presence.Offline,
         batteryPct = (d.obj("tele")?.get("pct") as? JsonPrimitive)?.intOrNull,
         lastSeenEpochMs = d.long("last_seen")?.let { it * 1000 },
+        rssi = (d.obj("tele")?.get("rssi") as? JsonPrimitive)?.intOrNull,
     )
 }
 

@@ -3,6 +3,7 @@
 #include "unity.h"
 #include "hb_msg.h"
 #include "hb_frame.h"
+#include "hb_fx.h"
 #include "hb_cfg.h"
 #include "hb_config.h"
 #include "hb_policy.h"
@@ -540,6 +541,38 @@ static void test_cfg_message_accepts_once_and_rejects_bad_sig_old_n_wrong_did(vo
     TEST_ASSERT_EQUAL_INT(0, g_cfg_pubs);  // a refused config is never answered
 }
 
+// "fx": every frame the app's Kotlin port is checked against comes from this code.
+static void test_fx_frames(void)
+{
+    static const char *kinds[] = {"none", "heart", "sorry", "annoy", "pair", "batt", "low"};
+    const cJSON *c;
+    int n = 0;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItem(cJSON_GetObjectItem(g_vec, "fx"), "cases")) {
+        const char *k = cJSON_GetObjectItem(c, "kind")->valuestring;
+        int kind = -1;
+        for (int i = 0; i < 7; i++) {
+            if (strcmp(k, kinds[i]) == 0) {
+                kind = i;
+            }
+        }
+        TEST_ASSERT_TRUE_MESSAGE(kind >= 0, k);
+        hb_fx_t fx;
+        uint8_t rgb[HB_PIXELS][3];
+        hb_fx_start(&fx, (hb_fx_kind_t)kind, (uint8_t)cJSON_GetObjectItem(c, "arg")->valueint, 5000);
+        bool more = hb_fx_frame(&fx, 5000u + (uint32_t)cJSON_GetObjectItem(c, "t")->valueint,
+                                (uint8_t)cJSON_GetObjectItem(c, "bright")->valueint, rgb);
+        TEST_ASSERT_EQUAL(cJSON_IsTrue(cJSON_GetObjectItem(c, "more")), more);
+        const cJSON *px = cJSON_GetObjectItem(c, "rgb");
+        for (int i = 0; i < HB_PIXELS; i++) {
+            for (int j = 0; j < 3; j++) {
+                TEST_ASSERT_EQUAL_UINT8(cJSON_GetArrayItem(cJSON_GetArrayItem(px, i), j)->valueint, rgb[i][j]);
+            }
+        }
+        n++;
+    }
+    TEST_ASSERT_GREATER_THAN(40, n);
+}
+
 int main(void)
 {
     size_t len;
@@ -575,6 +608,7 @@ int main(void)
     RUN_TEST(test_b64url);
     RUN_TEST(test_pinned_files_parse);
     RUN_TEST(test_cfg_message_accepts_once_and_rejects_bad_sig_old_n_wrong_did);
+    RUN_TEST(test_fx_frames);
     int rc = UNITY_END();
     cJSON_Delete(g_vec);
     return rc;
