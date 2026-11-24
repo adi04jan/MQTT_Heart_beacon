@@ -10,7 +10,7 @@ const hb_cfg_t hb_cfg_default = {
     .days = 0x1f,  // "1111100": Monday to Friday
     .start_min = 9 * 60,
     .stop_min = 19 * 60,
-    .idle_nap_min = 90,
+    .idle_nap_min = 0,  // NAP off by default (PROTOCOL.md 7)
     .nap_wake_min = 15,
     .batt_low_mv = 3450,
     .batt_off_mv = 3300,
@@ -44,7 +44,106 @@ static void activity(hb_core_t *c, uint32_t now_ms)
     }
 }
 
-static void on_gesture(hb_core_t *c, hb_btn_ev_t g, uint32_t now_ms, hb_actions_t *out)
+static uint64_t new_id(hb_core_t *c)  // splitmix64
+{
+    uint64_t z = (c->rng += 0x9e3779b97f4a7c15ull);
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+    return z ^ (z >> 31);
+}
+
+static void send_up(hb_actions_t *out, hb_mood_t k, hb_path_t path, uint64_t id)
+{
+    if (out->n_up < sizeof out->up / sizeof out->up[0]) {
+        out->up[out->n_up++] = (hb_up_t){.k = k, .path = path, .id = id};
+    }
+}
+
+// A new mood goes to the back of the outbox (the oldest is dropped when full); pump() sends it.
+static void queue_mood(hb_core_t *c, hb_mood_t k)
+{
+    if (c->n_out == HB_OUTBOX) {
+        memmove(&c->out[0], &c->out[1], sizeof c->out[0] * (HB_OUTBOX - 1));
+        c->n_out--;
+    }
+    c->out[c->n_out++] = (hb_pend_t){.id = new_id(c), .k = (uint8_t)k, .path = HB_PATH_NONE};
+}
+
+// PROTOCOL.md 4: send a waiting mood on the live path; no ack in 5 s, the same id on the other path; no
+// ack there either, parked until the next path report (HB_EV_PATH).
+static void pump(hb_core_t *c, uint32_t now_ms, hb_actions_t *out)
+{
+    for (uint8_t i = 0; i < c->n_out; i++) {
+        hb_pend_t *p = &c->out[i];
+        hb_path_t to;
+        if (p->path == HB_PATH_NONE) {
+            to = c->path;
+        } else if (p->sends == 1 && hb_due(now_ms, p->due)) {
+            to = p->path == HB_PATH_BLE ? HB_PATH_WIFI : HB_PATH_BLE;
+        } else {
+            continue;
+        }
+        if (to == HB_PATH_NONE) {
+            continue;
+        }
+        p->sends = p->path == HB_PATH_NONE ? 1 : 2;
+        p->path = (uint8_t)to;
+        p->due = now_ms + HB_ACK_MS;
+        send_up(out, (hb_mood_t)p->k, to, p->id);
+    }
+}
+
+static void acked(hb_core_t *c, uint64_t id)
+{
+    for (uint8_t i = 0; i < c->n_out; i++) {
+        if (c->out[i].id == id) {
+            memmove(&c->out[i], &c->out[i + 1], sizeof c->out[0] * (size_t)(c->n_out - i - 1));
+            c->n_out--;
+            return;
+        }
+    }
+}
+
+static bool seen(const hb_core_t *c, uint64_t id)
+{
+    for (uint8_t i = 0; i < c->n_seen; i++) {
+        if (c->seen[i] == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void remember(hb_core_t *c, uint64_t id)
+{
+    c->seen[c->seen_next] = id;
+    c->seen_next = (uint8_t)((c->seen_next + 1) % HB_SEEN);
+    if (c->n_seen < HB_SEEN) {
+        c->n_seen++;
+    }
+}
+
+// `show`: plays once per id; every accepted show, a repeat included, is answered with `shown` on the live
+// path (none: the router retries). An empty battery accepts nothing new.
+static void on_show(hb_core_t *c, const hb_ev_t *ev, uint32_t now_ms, hb_actions_t *out)
+{
+    if (ev->k <= HB_MOOD_NONE || ev->k > HB_MOOD_ANNOY) {
+        return;
+    }
+    if (!seen(c, ev->id)) {
+        if (c->state == HB_ST_LOWBATT) {
+            return;
+        }
+        remember(c, ev->id);
+        activity(c, now_ms);
+        hb_fx_start(&c->fx, k_mood_fx[ev->k], 0, now_ms);
+    }
+    if (c->path != HB_PATH_NONE) {
+        send_up(out, HB_MOOD_NONE, c->path, ev->id);
+    }
+}
+
+static void on_gesture(hb_core_t *c, hb_btn_ev_t g, uint32_t now_ms)
 {
     if (g == HB_BTN_NONE || c->state == HB_ST_LOWBATT) {
         return;
@@ -54,10 +153,12 @@ static void on_gesture(hb_core_t *c, hb_btn_ev_t g, uint32_t now_ms, hb_actions_
     switch (g) {
     case HB_BTN_TAP1:
     case HB_BTN_TAP2:
-    case HB_BTN_TAP3:
-        out->mood = (hb_mood_t)(HB_MOOD_HEART + (g - HB_BTN_TAP1));
-        hb_fx_start(&c->fx, k_mood_fx[out->mood], 0, now_ms);  // the presser's own beacon plays it too
+    case HB_BTN_TAP3: {
+        hb_mood_t k = (hb_mood_t)(HB_MOOD_HEART + (g - HB_BTN_TAP1));
+        queue_mood(c, k);
+        hb_fx_start(&c->fx, k_mood_fx[k], 0, now_ms);  // the presser's own beacon plays it too
         break;
+    }
     case HB_BTN_HOLD:
         battery_bar(c, now_ms);
         break;
@@ -79,6 +180,7 @@ static uint32_t sooner(uint32_t cur, uint32_t now_ms, uint32_t t)
 static void finish(hb_core_t *c, hb_state_t before, uint32_t now_ms, hb_actions_t *out)
 {
     hb_policy_eval(c, now_ms);
+    pump(c, now_ms, out);
     if (c->state == HB_ST_PAIRING && c->fx.kind == HB_FX_NONE) {
         hb_fx_start(&c->fx, HB_FX_PAIR, 0, now_ms);
     } else if (c->state != HB_ST_PAIRING && c->fx.kind == HB_FX_PAIR) {
@@ -112,6 +214,9 @@ static void finish(hb_core_t *c, hb_state_t before, uint32_t now_ms, hb_actions_
         if (c->cfg.idle_nap_min) {
             next = sooner(next, now_ms, c->nap_due);
         }
+        for (uint8_t i = 0; i < c->n_out; i++) {
+            next = sooner(next, now_ms, c->out[i].due);  // past deadlines (parked) are ignored
+        }
     }
     out->next_ms = next;
     out->state = c->state;
@@ -123,6 +228,11 @@ void hb_core_boot(hb_core_t *c, const hb_cfg_t *cfg, const hb_boot_t *boot, uint
     if (boot->wake == HB_WAKE_POWERON) {
         memset(c, 0, sizeof *c);
         c->state = HB_ST_OFFLINE;
+    }
+    c->rng ^= boot->seed;
+    for (uint8_t i = 0; i < c->n_out; i++) {  // moods from before the sleep: resent on the first path
+        c->out[i].path = HB_PATH_NONE;
+        c->out[i].sends = 0;
     }
     hb_state_t slept = c->state;
     memset(out, 0, sizeof *out);
@@ -173,7 +283,7 @@ void hb_core_step(hb_core_t *c, const hb_ev_t *ev, uint32_t now_ms, hb_actions_t
     memset(out, 0, sizeof *out);
     switch (ev->type) {
     case HB_EV_TICK:
-        on_gesture(c, hb_btn_update(&c->btn, ev->pressed, now_ms), now_ms, out);
+        on_gesture(c, hb_btn_update(&c->btn, ev->pressed, now_ms), now_ms);
         break;
     case HB_EV_BATT: {
         bool was_low = c->batt.low;
@@ -188,10 +298,7 @@ void hb_core_step(hb_core_t *c, const hb_ev_t *ev, uint32_t now_ms, hb_actions_t
         c->ms0 = now_ms;
         break;
     case HB_EV_SHOW:
-        if (ev->k > HB_MOOD_NONE && ev->k <= HB_MOOD_ANNOY && c->state != HB_ST_LOWBATT) {
-            activity(c, now_ms);
-            hb_fx_start(&c->fx, k_mood_fx[ev->k], 0, now_ms);
-        }
+        on_show(c, ev, now_ms, out);
         break;
     case HB_EV_SLEEP:
         if (c->state != HB_ST_LOWBATT) {
@@ -204,10 +311,20 @@ void hb_core_step(hb_core_t *c, const hb_ev_t *ev, uint32_t now_ms, hb_actions_t
         break;
     case HB_EV_PATH:
         c->path = ev->path;
+        for (uint8_t i = 0; i < c->n_out; i++) {  // a path report retries parked moods
+            hb_pend_t *p = &c->out[i];
+            if (p->sends == 2 && hb_due(now_ms, p->due)) {
+                p->path = HB_PATH_NONE;
+                p->sends = 0;
+            }
+        }
         break;
     case HB_EV_CLAIMED:
         c->claimed = true;
         c->pair_until = now_ms;
+        break;
+    case HB_EV_ACK:
+        acked(c, ev->id);
         break;
     }
     finish(c, before, now_ms, out);

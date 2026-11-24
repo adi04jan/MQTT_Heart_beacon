@@ -6,11 +6,13 @@
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_random.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "hb_core.h"
+#include "hb_msg.h"
 #include "hb_policy.h"
 #include "hb_port.h"
 #include "sdkconfig.h"
@@ -71,8 +73,10 @@ static void apply(const hb_actions_t *a)
     if (a->led_dirty) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(hb_led_show(a->led));
     }
-    if (a->mood) {
-        ESP_LOGI(TAG, "mood %s (radios off, not sent)", moods[a->mood]);
+    for (int i = 0; i < a->n_up; i++) {
+        char id[HB_ID_LEN + 1];
+        hb_id_format(a->up[i].id, id);
+        ESP_LOGI(TAG, "%s %s %s (radios off, not sent)", a->up[i].k ? "mood" : "shown", moods[a->up[i].k], id);
     }
     if (a->state_changed) {
         ESP_LOGI(TAG, "state %s", hb_state_name(a->state));
@@ -122,6 +126,7 @@ void app_main(void)
         .pressed = btn_pressed(),
         .mv = hb_adc_batt_mv(),
         .epoch = t > 1700000000 ? (uint32_t)t : 0,
+        .seed = (uint64_t)esp_random() << 32 | esp_random(),
     };
     ESP_LOGI(TAG, "battery %lu mV, claimed %d, clock %s", (unsigned long)boot.mv, boot.claimed,
              boot.epoch ? "set" : "unknown");

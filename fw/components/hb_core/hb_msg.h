@@ -6,7 +6,8 @@
 #include <stdbool.h>
 #include "cJSON.h"
 
-#define HB_MSG_MAX 1024  // bytes, whole envelope
+#define HB_MSG_MAX 1024        // bytes, whole envelope, any sender (what a receiver accepts)
+#define HB_MSG_MAX_BEACON 896  // bytes, what the beacon may send: a phone's `relay` around it still fits 1024
 #define HB_ID_LEN 16     // lowercase hex chars
 #define HB_DID_LEN 9     // "HB-" + 6 hex
 
@@ -40,8 +41,13 @@ bool hb_msg_known_type(const char *t);
 cJSON *hb_msg_new(const char *t, const char *id, uint32_t ts);
 // {"t":"resp", re, ok:false, err} with a fresh id and ts supplied by the caller.
 cJSON *hb_msg_resp_error(const char *re, const char *err, const char *id, uint32_t ts);
-// Compact print into buf (NUL-terminated). Returns length, or -1 if it does not fit or exceeds HB_MSG_MAX.
+// Compact print into buf (NUL-terminated) of a message the beacon sends. Returns length, or -1 if it does
+// not fit in buf or exceeds HB_MSG_MAX_BEACON (PROTOCOL.md 2.1).
 int hb_msg_print(const cJSON *msg, char *buf, size_t cap);
+
+// Envelope id <-> 64 bits (hb_core keeps ids as integers). Parse accepts exactly 16 chars [0-9a-f].
+bool hb_id_parse(const char *s, uint64_t *out);
+void hb_id_format(uint64_t id, char out[HB_ID_LEN + 1]);
 
 // "HB-" + last 3 MAC bytes, uppercase hex.
 void hb_did_from_mac(const uint8_t mac[6], char out[HB_DID_LEN + 1]);

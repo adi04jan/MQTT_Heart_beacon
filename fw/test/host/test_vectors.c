@@ -1,9 +1,10 @@
-// Golden vectors (protocol/vectors.json) against hb_msg, hb_frame and hb_cfg_default. Config parse vectors
-// join in M3 (hb_config).
+// Golden vectors (protocol/vectors.json) against hb_msg, hb_frame, hb_cfg_default and the schedule. Config
+// parse and signature vectors join in M3 (hb_config, mbedTLS).
 #include "unity.h"
 #include "hb_msg.h"
 #include "hb_frame.h"
 #include "hb_cfg.h"
+#include "hb_policy.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -145,6 +146,58 @@ static void test_did_from_mac(void)
     }
 }
 
+static void test_state_names(void)
+{
+    const cJSON *states = section("envelope", "states"), *s;
+    TEST_ASSERT_EQUAL_INT(HB_ST_LOWBATT + 1, cJSON_GetArraySize(states));
+    int i = 0;
+    cJSON_ArrayForEach(s, states) {
+        TEST_ASSERT_EQUAL_STRING(s->valuestring, hb_state_name((hb_state_t)i++));
+    }
+}
+
+// The beacon's encoder: every message it prints is capped at 896 B (envelope.size beacon_ok).
+static void test_beacon_size_cap(void)
+{
+    TEST_ASSERT_EQUAL_INT(HB_MSG_MAX_BEACON, num(cJSON_GetObjectItemCaseSensitive(g_vec, "envelope"), "max_beacon_bytes"));
+    const cJSON *v;
+    static char buf[2 * HB_MSG_MAX];
+    cJSON_ArrayForEach(v, section("envelope", "size")) {
+        const char *name = str(v, "name");
+        cJSON *m = hb_msg_new(str(v, "t"), str(v, "id"), (uint32_t)num(v, "ts"));
+        const cJSON *kv;
+        cJSON_ArrayForEach(kv, cJSON_GetObjectItemCaseSensitive(v, "body")) {
+            cJSON_AddItemToObject(m, kv->string, cJSON_Duplicate(kv, true));
+        }
+        int n = hb_msg_print(m, buf, sizeof buf);
+        cJSON_Delete(m);
+        if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(v, "beacon_ok"))) {
+            TEST_ASSERT_EQUAL_INT_MESSAGE((int)num(v, "bytes"), n, name);
+        } else {
+            TEST_ASSERT_EQUAL_INT_MESSAGE(-1, n, name);
+        }
+    }
+}
+
+static void test_id_parse_and_format(void)
+{
+    const cJSON *v;
+    cJSON_ArrayForEach(v, section("envelope", "encode")) {
+        uint64_t id;
+        char back[HB_ID_LEN + 1];
+        TEST_ASSERT_TRUE(hb_id_parse(str(v, "id"), &id));
+        hb_id_format(id, back);
+        TEST_ASSERT_EQUAL_STRING(str(v, "id"), back);
+    }
+    uint64_t id;
+    TEST_ASSERT_TRUE(hb_id_parse("ffffffffffffffff", &id) && id == UINT64_MAX);
+    TEST_ASSERT_TRUE(hb_id_parse("00000000000000aa", &id) && id == 0xaa);
+    TEST_ASSERT_FALSE(hb_id_parse("0123456789ABCDEF", &id));
+    TEST_ASSERT_FALSE(hb_id_parse("0123456789abcde", &id));
+    TEST_ASSERT_FALSE(hb_id_parse("0123456789abcdef0", &id));
+    TEST_ASSERT_FALSE(hb_id_parse("", &id));
+}
+
 static void test_print_refuses_small_buffer_and_oversize(void)
 {
     char small[8], big[2 * HB_MSG_MAX];
@@ -247,6 +300,30 @@ static void test_cfg_defaults_match_vectors(void)
     TEST_ASSERT_EQUAL_INT(num(pwr, "batt_cal_ppm"), c->batt_cal_ppm);
 }
 
+static void test_schedule(void)
+{
+    const cJSON *v;
+    cJSON_ArrayForEach(v, section("config", "sched")) {
+        const char *name = str(v, "name");
+        const cJSON *s = cJSON_GetObjectItemCaseSensitive(v, "sched");
+        hb_cfg_t c = hb_cfg_default;
+        c.sched_on = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(s, "on"));
+        c.tz_min = (int16_t)num(s, "tz");
+        c.days = 0;
+        for (int i = 0; i < 7; i++) {
+            c.days |= (uint8_t)((str(s, "days")[i] == '1') << i);
+        }
+        c.start_min = (uint16_t)hhmm(str(s, "start"));
+        c.stop_min = (uint16_t)hhmm(str(s, "stop"));
+        uint32_t epoch = (uint32_t)num(v, "epoch");
+        TEST_ASSERT_EQUAL_MESSAGE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(v, "in_hours")),
+                                  hb_sched_in_hours(&c, epoch), name);
+        if (cJSON_GetObjectItemCaseSensitive(v, "next_start_s")) {
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE((uint32_t)num(v, "next_start_s"), hb_sched_secs_to_start(&c, epoch), name);
+        }
+    }
+}
+
 int main(void)
 {
     FILE *f = fopen(HB_VECTORS_PATH, "rb");
@@ -276,11 +353,15 @@ int main(void)
     RUN_TEST(test_decode);
     RUN_TEST(test_unknown_t_gets_error_resp);
     RUN_TEST(test_did_from_mac);
+    RUN_TEST(test_state_names);
+    RUN_TEST(test_beacon_size_cap);
+    RUN_TEST(test_id_parse_and_format);
     RUN_TEST(test_print_refuses_small_buffer_and_oversize);
     RUN_TEST(test_split_and_reassemble);
     RUN_TEST(test_split_rejects);
     RUN_TEST(test_reassemble_steps);
     RUN_TEST(test_cfg_defaults_match_vectors);
+    RUN_TEST(test_schedule);
     int rc = UNITY_END();
     cJSON_Delete(g_vec);
     return rc;

@@ -11,8 +11,8 @@ typedef struct {
     int16_t tz_min;          // sched.tz, minutes east of UTC
     uint8_t days;            // sched.days, bit 0 = Monday .. bit 6 = Sunday
     uint16_t start_min;      // sched.start, minutes after local midnight
-    uint16_t stop_min;       // sched.stop; stop <= start means the window runs past midnight
-    uint16_t idle_nap_min;   // pwr.idle_nap_min, 0 = never nap
+    uint16_t stop_min;       // sched.stop; stop < start runs past midnight, stop == start is 24 h (PROTOCOL.md 7.2)
+    uint16_t idle_nap_min;   // pwr.idle_nap_min, 0 = never nap (the default)
     uint16_t nap_wake_min;   // pwr.nap_wake_min
     uint16_t batt_low_mv;    // pwr.batt_low_mv
     uint16_t batt_off_mv;    // pwr.batt_off_mv

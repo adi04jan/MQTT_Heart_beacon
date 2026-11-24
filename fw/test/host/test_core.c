@@ -372,7 +372,9 @@ static hb_core_t core;  // persists across boots like RTC memory
 static hb_actions_t act;
 static uint32_t now, g_mv;
 static hb_cfg_t g_cfg;
-static hb_mood_t g_mood;
+static hb_mood_t g_mood;  // last mood sent
+static hb_up_t g_ups[64];  // every uplink since boot()
+static int g_n_ups;
 static int g_measured, g_measured_lit, g_low_starts;
 
 static void boot(hb_wake_t wake, bool claimed, bool pressed, uint32_t mv, uint32_t epoch)
@@ -380,7 +382,8 @@ static void boot(hb_wake_t wake, bool claimed, bool pressed, uint32_t mv, uint32
     now = 300;  // ms since reset when app_main gets going
     g_mv = mv;
     g_mood = HB_MOOD_NONE;
-    hb_boot_t b = {.wake = wake, .claimed = claimed, .pressed = pressed, .mv = mv, .epoch = epoch};
+    g_n_ups = 0;
+    hb_boot_t b = {.wake = wake, .claimed = claimed, .pressed = pressed, .mv = mv, .epoch = epoch, .seed = 42};
     hb_core_boot(&core, &g_cfg, &b, now, &act);
 }
 
@@ -388,8 +391,13 @@ static void step(const hb_ev_t *ev)
 {
     hb_fx_t before = core.fx;
     hb_core_step(&core, ev, now, &act);
-    if (act.mood) {
-        g_mood = act.mood;
+    for (int i = 0; i < act.n_up; i++) {
+        if (g_n_ups < 64) {
+            g_ups[g_n_ups++] = act.up[i];
+        }
+        if (act.up[i].k) {
+            g_mood = act.up[i].k;
+        }
     }
     g_low_starts += core.fx.kind == HB_FX_LOW && (before.kind != HB_FX_LOW || before.t0 != core.fx.t0);
 }
@@ -421,6 +429,24 @@ static bool run(uint32_t ms, bool pressed)
         step(&e);
     }
     return act.sleep;
+}
+
+static void path(hb_path_t p)
+{
+    hb_ev_t e = {.type = HB_EV_PATH, .path = p};
+    step(&e);
+}
+
+static void ack(uint64_t id)
+{
+    hb_ev_t e = {.type = HB_EV_ACK, .id = id};
+    step(&e);
+}
+
+static void show(hb_mood_t k, uint64_t id)
+{
+    hb_ev_t e = {.type = HB_EV_SHOW, .k = k, .id = id};
+    step(&e);
 }
 
 static void tap(int n)
@@ -455,9 +481,11 @@ static void test_gestures_send_and_play_moods(void)
 {
     g_cfg = hb_cfg_default;
     boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    path(HB_PATH_WIFI);
     run(3000, false);
     tap(1);
     TEST_ASSERT_EQUAL_INT(HB_MOOD_HEART, g_mood);
+    TEST_ASSERT_EQUAL_INT(HB_PATH_WIFI, g_ups[0].path);
     TEST_ASSERT_EQUAL_UINT8(HB_FX_HEART, core.fx.kind);
     run(4000, false);
     tap(2);
@@ -478,7 +506,7 @@ static void test_five_second_hold_opens_pairing_and_claim_closes_it(void)
     run(4200, true);
     TEST_ASSERT_EQUAL_INT(HB_ST_PAIRING, act.state);
     run(100, false);
-    TEST_ASSERT_EQUAL_INT(HB_MOOD_NONE, g_mood);  // a hold never sends
+    TEST_ASSERT_EQUAL_UINT8(0, core.n_out);  // a hold never sends
     hb_ev_t e = {.type = HB_EV_PATH, .path = HB_PATH_BLE};
     step(&e);
     TEST_ASSERT_EQUAL_INT(HB_ST_PAIRING, act.state);
@@ -506,7 +534,8 @@ static void test_path_picks_near_away_offline(void)
 
 static void test_nap_after_idle_and_tap_restarts_the_count(void)
 {
-    g_cfg = hb_cfg_default;  // idle_nap_min 90, nap_wake_min 15
+    g_cfg = hb_cfg_default;
+    g_cfg.idle_nap_min = 90;  // nap_wake_min 15
     boot(HB_WAKE_POWERON, true, false, 3900, 0);
     TEST_ASSERT_FALSE(run(89 * 60000, false));
     tap(1);
@@ -517,15 +546,15 @@ static void test_nap_after_idle_and_tap_restarts_the_count(void)
     TEST_ASSERT_EQUAL_UINT8(0, core.led[0][0] | core.led[0][1] | core.led[0][2]);  // dark before sleep
 }
 
-static void test_nap_can_be_disabled_and_never_happens_near(void)
+static void test_nap_is_off_by_default_and_never_happens_near(void)
 {
     g_cfg = hb_cfg_default;
-    g_cfg.idle_nap_min = 0;
+    TEST_ASSERT_EQUAL_UINT16(0, g_cfg.idle_nap_min);
     boot(HB_WAKE_POWERON, true, false, 3900, 0);
     TEST_ASSERT_FALSE(run(24 * 3600000u, false));
     TEST_ASSERT_EQUAL_INT(HB_ST_OFFLINE, act.state);
 
-    g_cfg = hb_cfg_default;
+    g_cfg.idle_nap_min = 90;
     boot(HB_WAKE_POWERON, true, false, 3900, 0);
     hb_ev_t e = {.type = HB_EV_PATH, .path = HB_PATH_BLE};
     step(&e);
@@ -536,6 +565,7 @@ static void test_nap_can_be_disabled_and_never_happens_near(void)
 static void test_nap_timer_wake_checks_in_then_naps_again(void)
 {
     g_cfg = hb_cfg_default;
+    g_cfg.idle_nap_min = 90;
     boot(HB_WAKE_POWERON, true, false, 3900, 0);
     TEST_ASSERT_TRUE(run(91 * 60000, false));
     TEST_ASSERT_EQUAL_INT(HB_ST_NAP, act.state);
@@ -551,7 +581,7 @@ static void test_nap_timer_wake_checks_in_then_naps_again(void)
     boot(HB_WAKE_BUTTON, true, true, 3900, 0);  // button wake: awake again for the full idle time
     TEST_ASSERT_EQUAL_UINT8(HB_FX_BATT, core.fx.kind);
     TEST_ASSERT_FALSE(run(60 * 60000, false));
-    TEST_ASSERT_EQUAL_INT(HB_MOOD_NONE, g_mood);  // the wake press sent nothing
+    TEST_ASSERT_EQUAL_UINT8(0, core.n_out);  // the wake press sent nothing
     TEST_ASSERT_EQUAL_INT(HB_ST_OFFLINE, act.state);
 }
 
@@ -638,7 +668,7 @@ static void test_lowbatt_sleeps_button_only_and_rechecks_on_wake(void)
     TEST_ASSERT_FALSE(run(5000, true));  // never sleeps with the button down
     run(10, false);
     TEST_ASSERT_TRUE(run(5000, false));
-    TEST_ASSERT_EQUAL_INT(HB_MOOD_NONE, g_mood);
+    TEST_ASSERT_EQUAL_UINT8(0, core.n_out);
 
     boot(HB_WAKE_BUTTON, true, false, 3700, 0);  // charged
     TEST_ASSERT_EQUAL_INT(HB_ST_OFFLINE, act.state);
@@ -674,6 +704,129 @@ static void test_battery_is_never_sampled_while_leds_are_lit(void)
     TEST_ASSERT_EQUAL_INT(0, g_measured_lit);
 }
 
+// ---- uplink acks and show dedupe (PROTOCOL.md 4) -----------------------------------------------------
+
+static void test_mood_waits_for_a_path_then_tries_the_other_after_5s(void)
+{
+    g_cfg = hb_cfg_default;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    run(3000, false);
+    tap(1);
+    TEST_ASSERT_EQUAL_INT(0, g_n_ups);  // offline: held
+    TEST_ASSERT_EQUAL_UINT8(1, core.n_out);
+    uint64_t id = core.out[0].id;
+    path(HB_PATH_BLE);
+    TEST_ASSERT_EQUAL_INT(1, g_n_ups);
+    TEST_ASSERT_TRUE(g_ups[0].k == HB_MOOD_HEART && g_ups[0].path == HB_PATH_BLE && g_ups[0].id == id);
+    run(HB_ACK_MS - 100, false);
+    TEST_ASSERT_EQUAL_INT(1, g_n_ups);
+    run(200, false);  // no `resp` from the phone in 5 s: the same id on WiFi
+    TEST_ASSERT_EQUAL_INT(2, g_n_ups);
+    TEST_ASSERT_TRUE(g_ups[1].k == HB_MOOD_HEART && g_ups[1].path == HB_PATH_WIFI && g_ups[1].id == id);
+    run(60000, false);  // no PUBACK either: parked, not resent every 5 s
+    TEST_ASSERT_EQUAL_INT(2, g_n_ups);
+    path(HB_PATH_WIFI);  // the next path report retries it
+    TEST_ASSERT_EQUAL_INT(3, g_n_ups);
+    TEST_ASSERT_TRUE(g_ups[2].path == HB_PATH_WIFI && g_ups[2].id == id);
+    ack(id);
+    TEST_ASSERT_EQUAL_UINT8(0, core.n_out);
+    run(60000, false);
+    TEST_ASSERT_EQUAL_INT(3, g_n_ups);
+}
+
+static void test_ack_clears_only_its_own_mood(void)
+{
+    g_cfg = hb_cfg_default;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    path(HB_PATH_BLE);
+    run(3000, false);
+    tap(1);
+    TEST_ASSERT_EQUAL_INT(1, g_n_ups);
+    uint64_t id = g_ups[0].id;
+    ack(id ^ 1);  // an ack for something else (the phone acks every relayed message)
+    TEST_ASSERT_EQUAL_UINT8(1, core.n_out);
+    ack(id);  // the phone's resp{re: id, ok: true}
+    TEST_ASSERT_EQUAL_UINT8(0, core.n_out);
+    run(60000, false);
+    TEST_ASSERT_EQUAL_INT(1, g_n_ups);  // nothing resent
+}
+
+static void test_outbox_keeps_the_newest_four_with_distinct_ids(void)
+{
+    g_cfg = hb_cfg_default;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    run(3000, false);
+    tap(1);
+    uint64_t oldest = core.out[0].id;
+    for (int i = 0; i < HB_OUTBOX; i++) {
+        run(4000, false);
+        tap(i % 2 + 1);
+    }
+    TEST_ASSERT_EQUAL_UINT8(HB_OUTBOX, core.n_out);
+    path(HB_PATH_WIFI);
+    TEST_ASSERT_EQUAL_INT(HB_OUTBOX, g_n_ups);
+    for (int i = 0; i < HB_OUTBOX; i++) {
+        TEST_ASSERT_TRUE(g_ups[i].id != oldest && g_ups[i].id == core.out[i].id);
+        for (int j = 0; j < i; j++) {
+            TEST_ASSERT_TRUE(g_ups[i].id != g_ups[j].id);
+        }
+    }
+}
+
+static void test_unacked_mood_survives_deep_sleep_and_goes_out_on_the_first_path(void)
+{
+    g_cfg = hb_cfg_default;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    path(HB_PATH_BLE);
+    run(3000, false);
+    tap(1);
+    uint64_t id = g_ups[0].id;
+    hb_ev_t e = {.type = HB_EV_SLEEP, .for_s = 600};
+    step(&e);
+    TEST_ASSERT_TRUE(run(10000, false));
+
+    boot(HB_WAKE_TIMER, true, false, 3900, 0);
+    TEST_ASSERT_EQUAL_UINT8(1, core.n_out);
+    TEST_ASSERT_EQUAL_INT(0, g_n_ups);
+    path(HB_PATH_WIFI);
+    TEST_ASSERT_EQUAL_INT(1, g_n_ups);
+    TEST_ASSERT_TRUE(g_ups[0].id == id && g_ups[0].path == HB_PATH_WIFI);
+}
+
+static void test_duplicate_show_answers_shown_without_replaying(void)
+{
+    g_cfg = hb_cfg_default;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    path(HB_PATH_WIFI);
+    run(5000, false);  // the boot battery bar is over
+    show(HB_MOOD_HEART, 0xaa);
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_HEART, core.fx.kind);
+    TEST_ASSERT_EQUAL_INT(1, g_n_ups);
+    TEST_ASSERT_TRUE(g_ups[0].k == HB_MOOD_NONE && g_ups[0].id == 0xaa && g_ups[0].path == HB_PATH_WIFI);
+    run(5000, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_NONE, core.fx.kind);
+
+    show(HB_MOOD_HEART, 0xaa);  // the router's retry on the other path, or a re-flush after a wake
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_NONE, core.fx.kind);  // not replayed
+    TEST_ASSERT_EQUAL_INT(2, g_n_ups);
+    TEST_ASSERT_TRUE(g_ups[1].k == HB_MOOD_NONE && g_ups[1].id == 0xaa);
+
+    for (uint64_t i = 1; i <= HB_SEEN; i++) {  // 16 newer ids push it out of the ring
+        show(HB_MOOD_SORRY, 0x100 + i);
+    }
+    run(5000, false);
+    show(HB_MOOD_HEART, 0xaa);
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_HEART, core.fx.kind);
+
+    int before = g_n_ups;
+    show(HB_MOOD_NONE, 0xbb);  // no kind: dropped, unanswered
+    path(HB_PATH_NONE);
+    run(5000, false);
+    show(HB_MOOD_ANNOY, 0xcc);  // no path to answer on: plays; the router retries for the receipt
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_ANNOY, core.fx.kind);
+    TEST_ASSERT_EQUAL_INT(before, g_n_ups);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -699,7 +852,7 @@ int main(void)
     RUN_TEST(test_five_second_hold_opens_pairing_and_claim_closes_it);
     RUN_TEST(test_path_picks_near_away_offline);
     RUN_TEST(test_nap_after_idle_and_tap_restarts_the_count);
-    RUN_TEST(test_nap_can_be_disabled_and_never_happens_near);
+    RUN_TEST(test_nap_is_off_by_default_and_never_happens_near);
     RUN_TEST(test_nap_timer_wake_checks_in_then_naps_again);
     RUN_TEST(test_schedule_off_sleeps_until_next_start);
     RUN_TEST(test_button_wake_out_of_hours_stays_up_five_minutes);
@@ -708,5 +861,10 @@ int main(void)
     RUN_TEST(test_lowbatt_sleeps_button_only_and_rechecks_on_wake);
     RUN_TEST(test_draining_battery_warns_once_then_lowbatt);
     RUN_TEST(test_battery_is_never_sampled_while_leds_are_lit);
+    RUN_TEST(test_mood_waits_for_a_path_then_tries_the_other_after_5s);
+    RUN_TEST(test_ack_clears_only_its_own_mood);
+    RUN_TEST(test_outbox_keeps_the_newest_four_with_distinct_ids);
+    RUN_TEST(test_unacked_mood_survives_deep_sleep_and_goes_out_on_the_first_path);
+    RUN_TEST(test_duplicate_show_answers_shown_without_replaying);
     return UNITY_END();
 }

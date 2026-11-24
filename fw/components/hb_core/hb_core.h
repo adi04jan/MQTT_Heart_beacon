@@ -15,6 +15,9 @@
 #define HB_PAIR_WINDOW_MS 120000    // pairing window after a 5 s hold or an unclaimed power-on
 #define HB_BTN_GRACE_MS 300000      // no schedule SLEEP within 5 min of a button wake or gesture
 #define HB_NAP_CHECKIN_MS 10000     // a NAP timer wake stays up this long
+#define HB_SEEN 16                  // `show` ids remembered for dedupe (PROTOCOL.md 3: ring of 16)
+#define HB_OUTBOX 4                 // moods waiting for an ack; a fifth drops the oldest
+#define HB_ACK_MS 5000              // PROTOCOL.md 4: no ack in 5 s, resend the same id on the other path
 
 typedef enum {  // plan "Power / States"; NAP, SLEEP and LOWBATT are deep sleep
     HB_ST_PAIRING,
@@ -34,10 +37,11 @@ typedef enum {
     HB_EV_TICK,      // pressed = button level now (the port samples it for every tick)
     HB_EV_BATT,      // mv = battery mV after the divider, answering actions.measure_batt
     HB_EV_TIME,      // ts = epoch seconds from the phone or router (`time` message)
-    HB_EV_SHOW,      // k = mood to play (`show` message); radio stub until M3
+    HB_EV_SHOW,      // k + id (`show` message): plays once per id, answers `shown` every time; radio stub until M3
     HB_EV_SLEEP,     // for_s (`sleep` message, 0 = until schedule on or button); radio stub until M3
     HB_EV_PATH,      // path = live server path, as decided by hb_link; radio stub until M3/M4
     HB_EV_CLAIMED,   // claim accepted (closes the pairing window); radio stub until M4
+    HB_EV_ACK,       // id: an uplink was acked (WiFi: its PUBACK; BLE: the phone's `resp{re: id, ok: true}`)
 } hb_ev_type_t;
 
 typedef struct {
@@ -50,7 +54,24 @@ typedef struct {
         uint32_t for_s;
         hb_path_t path;
     };
+    uint64_t id;  // HB_EV_SHOW, HB_EV_ACK (hb_id_parse of the envelope id)
 } hb_ev_t;
+
+// One message for the port to send now (radio stub until M3).
+typedef struct {
+    hb_mood_t k;      // HB_MOOD_NONE: `shown` with this id; else `mood` k with this id
+    hb_path_t path;   // the path to send it on (the port brings that path up if it has to)
+    uint64_t id;
+} hb_up_t;
+
+// A mood waiting for its ack, kept in RTC memory through deep sleep.
+typedef struct {
+    uint64_t id;
+    uint32_t due;     // ack deadline of the last send
+    uint8_t k;        // hb_mood_t
+    uint8_t path;     // hb_path_t of the last send; HB_PATH_NONE = waiting for a path
+    uint8_t sends;    // 1: sent on one path; 2: on the other too, then parked until the next path report
+} hb_pend_t;
 
 typedef struct {
     hb_wake_t wake;
@@ -58,13 +79,15 @@ typedef struct {
     bool pressed;     // button level at boot (the wake press)
     uint32_t mv;      // first battery sample, taken before any LED lights
     uint32_t epoch;   // wall clock kept by the RTC across deep sleep, 0 = unknown
+    uint64_t seed;    // random bits (esp_random) mixed into the message id generator on every boot
 } hb_boot_t;
 
-// Apply in field order: LEDs, uplink, measurement, then deep sleep.
+// Apply in field order: LEDs, uplinks, measurement, then deep sleep.
 typedef struct {
     bool led_dirty;                 // push led[] (only set when the frame changed)
     uint8_t led[HB_PIXELS][3];      // r, g, b
-    hb_mood_t mood;                 // send this mood uplink (radio stub until M3)
+    hb_up_t up[HB_OUTBOX + 1];      // send these, in order: a `shown` and the moods due
+    uint8_t n_up;
     bool measure_batt;              // read the battery and post HB_EV_BATT
     bool sleep;                     // enter deep sleep now; LEDs are dark, button wake on
     uint32_t sleep_s;               // with a timer wake after this many seconds, 0 = button only
@@ -86,6 +109,11 @@ typedef struct {
     hb_fx_t fx;
     hb_batt_t batt;
     uint8_t led[HB_PIXELS][3];  // last frame handed out
+    uint64_t rng;               // message id generator (splitmix64), seeded by hb_boot_t.seed
+    uint64_t seen[HB_SEEN];     // `show` ids already played; the oldest is overwritten
+    uint8_t n_seen, seen_next;
+    hb_pend_t out[HB_OUTBOX];   // moods sent or waiting to be, oldest first
+    uint8_t n_out;
 } hb_core_t;
 
 // Every boot, before any step. On HB_WAKE_POWERON the core is reset; otherwise c holds the state it

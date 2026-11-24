@@ -8,17 +8,40 @@ static const char *const k_types[] = {
     "claim", "wifi.scan", "wifi.list", "wifi.set", "wifi.forget", "wifi.use", "link", "relay", "reset",
 };
 
-static bool is_id(const cJSON *j)
+bool hb_id_parse(const char *s, uint64_t *out)
 {
-    if (!cJSON_IsString(j) || strlen(j->valuestring) != HB_ID_LEN) {
-        return false;
-    }
-    for (const char *p = j->valuestring; *p; p++) {
-        if (!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f'))) {
+    uint64_t v = 0;
+    size_t i = 0;
+    for (; s[i] && i < HB_ID_LEN; i++) {
+        char ch = s[i];
+        if (ch >= '0' && ch <= '9') {
+            v = v << 4 | (uint64_t)(ch - '0');
+        } else if (ch >= 'a' && ch <= 'f') {
+            v = v << 4 | (uint64_t)(ch - 'a' + 10);
+        } else {
             return false;
         }
     }
+    if (i != HB_ID_LEN || s[i]) {
+        return false;
+    }
+    *out = v;
     return true;
+}
+
+void hb_id_format(uint64_t id, char out[HB_ID_LEN + 1])
+{
+    static const char hex[] = "0123456789abcdef";
+    for (int i = HB_ID_LEN - 1; i >= 0; i--, id >>= 4) {
+        out[i] = hex[id & 0xf];
+    }
+    out[HB_ID_LEN] = 0;
+}
+
+static bool is_id(const cJSON *j)
+{
+    uint64_t ignored;
+    return cJSON_IsString(j) && hb_id_parse(j->valuestring, &ignored);
 }
 
 hb_msg_err_t hb_msg_decode(const char *buf, size_t len, hb_msg_t *out)
@@ -115,7 +138,7 @@ int hb_msg_print(const cJSON *msg, char *buf, size_t cap)
         return -1;
     }
     size_t n = strlen(buf);
-    return n <= HB_MSG_MAX ? (int)n : -1;
+    return n <= HB_MSG_MAX_BEACON ? (int)n : -1;
 }
 
 void hb_did_from_mac(const uint8_t mac[6], char out[HB_DID_LEN + 1])
