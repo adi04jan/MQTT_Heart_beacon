@@ -12,7 +12,7 @@
 
 //#define TEST_ADC 1
 #define DUMMY_VOLTAGE 5096
-#define CURRENT_FIRMWARE_VERSION "0.1.2"  // Change this as needed
+#define CURRENT_FIRMWARE_VERSION "0.1.3"  // Change this as needed
 #define USER_BTN 0
 #define LED_PIN 2
 #define BATT_PIN A3
@@ -27,7 +27,7 @@ const uint32_t MQTT_RETRY_MS = 5000;
 const uint32_t OFFLINE_SLEEP_AFTER_MS = 5UL * 60 * 1000;  // offline this long -> deep sleep
 RTC_DATA_ATTR uint8_t offline_fails = 0;                   // ... and retry after offline_retry_s(): 1, 3, then 15 min
 const uint32_t BATT_CHECK_MS = 15000;
-const uint32_t BATT_REPORT_MS = 30UL * 60 * 1000;
+const uint32_t BATT_REPORT_MS = 6UL * 3600 * 1000;    // routine BATT_STATUS every 6 h (was 30 min: Telegram noise)
 const uint32_t OTA_TIMEOUT_MS = 120000;
 // ponytail: v1 payloads carry no timestamp, so a sleep command arriving this soon after (re)connect is assumed to
 // be queued from while we were away and ignored. v2 adds timestamps.
@@ -58,6 +58,8 @@ const uint8_t total_ssid_count = sizeof(ssids) / sizeof(ssids[0]);
 bool STATUS_FLAG = true;
 bool SLEEP_FLAG = false;
 RTC_DATA_ATTR bool pending_heart = false;  // button pressed while offline: send on reconnect, survives sleep
+bool announce_online = false;              // publish Online on the first MQTT connect of a user-started boot only
+RTC_DATA_ATTR bool low_reported = false;   // low-battery BATT_STATUS already sent (re-armed after charging)
 
 // Last good AP, kept across deep sleep so a timer/button wake reconnects without a scan.
 RTC_DATA_ATTR int8_t cached_idx = -1;
@@ -245,7 +247,12 @@ void go_to_sleep(bool until_office) {
 
 void low_batt_notify() {
   uint32_t mv = check_batt_voltage();
+  if (mv > LOW_BATT_MV + 100) low_reported = false;  // re-arm with 100 mV hysteresis (e.g. after charging)
   if (mv > LOW_BATT_MV) return;
+  if (!low_reported && client.connected()) {  // one battery report when it first goes low, not every 15 s
+    low_reported = true;
+    publishMqttMessage(MQTT_TOPIC, MQTT_MSG_3);
+  }
   Serial.printf("Low Battery Detected: %lu mV\n", (unsigned long)mv);
   for (int i = 0; i < 3; i++) {
     strip.setPixelColor(0, strip.Color(200, 0, 0));
@@ -408,7 +415,10 @@ bool mqtt_connect() {
   Serial.println("MQTT connected as " + id);
   crumb("M");
   client.subscribe(MQTT_TOPIC, 1);
-  publishMqttMessage(MQTT_TOPIC, MQTT_MSG_2);  // Online
+  if (announce_online) {  // once per user-started boot; reconnects and scheduled wakes stay quiet on Telegram
+    announce_online = false;
+    publishMqttMessage(MQTT_TOPIC, MQTT_MSG_2);  // Online
+  }
   if (pending_heart) {
     pending_heart = false;
     publishMqttMessage(MQTT_TOPIC, MQTT_MSG_1);
@@ -468,6 +478,7 @@ void setup() {
     hold_ms = SCHED_GRACE_MS;
   }
   STATUS_FLAG = !quiet;  // details reply only on user-started boots (the bridge relays it to Telegram)
+  announce_online = !quiet;
 
   perform_ota();
   crumb("O");

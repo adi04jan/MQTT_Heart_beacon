@@ -97,8 +97,8 @@ must match exactly. The device accepts both capitalisations for Sorry/Annoy/Deta
 | Firmware constant | Value | Sent by | Device reaction |
 |---|---|---|---|
 | `MQTT_MSG_1` | `Miss you` | button tap, bridge "miss" | red heartbeat |
-| `MQTT_MSG_2` | `Online` | device on every MQTT (re)connect | green heartbeat (not for its own echo) |
-| `MQTT_MSG_3` | `BATT_STATUS` | device, periodic (~30 min) | none |
+| `MQTT_MSG_2` | `Online` | device, first MQTT connect after power-on or button wake | green heartbeat (not for its own echo) |
+| `MQTT_MSG_3` | `BATT_STATUS` | device, every 6 h + once on low battery | none |
 | `MQTT_MSG_4` | `DEEP SLEEP` | device, right before deep sleep | none |
 | `MQTT_GO_SLEEP` | `GO_DEEP_SLEEP` | bridge | purple pulse, then deep sleep |
 | `MQTT_MSG_SORRY_*` / `ANNOY_*` | `Sorry` / `Annoy` | bridge | orange / cyan heartbeat |
@@ -202,9 +202,11 @@ the API (8443), admin (127.0.0.1:8444) and the router. Deploy needs from the use
 `mqtt_to_telegram.sh` runs two loops: `mqtt_listener` (background, `mosquitto_sub` piped into `jq`) and
 `telegram_poller` (foreground, `getUpdates` long-poll + 10 s sleep). Admin vs. regular users is decided by the
 `USERS` map plus a hard-coded admin ID inside `mqtt_listener`; keep those consistent when editing.
-Known defects (bridge is retired in v2, so left as is): non-admin users get "❤️ Miss you" for *every* device
-message (Online, BATT_STATUS, DEEP SLEEP, details); any Telegram user can send commands; if the broker restarts,
-`mosquitto_sub` exits but the service stays active, so run `systemctl restart telegram_heart` after a broker restart.
+Forwarding (repo version, 2026-11-24): non-admin users get "❤️ Miss you" only for real hearts (`MQTT_MSG_1`); the
+admin gets every device message except routine `BATT_STATUS` (>= 3.5 V). The deployed copy on the server holds the
+real token and IDs, so apply repo changes to it as a patch, never by overwriting the file. Known defects (bridge
+is retired in v2): any Telegram user can send commands; if the broker restarts, `mosquitto_sub` exits but the
+service stays active, so run `systemctl restart telegram_heart` after a broker restart.
 
 Deploy (server needs `mosquitto-clients`, `jq`, `curl`):
 
@@ -214,6 +216,15 @@ sudo install -m 644 Telegram_server_service/etc/systemd/system/telegram_heart.se
 sudo systemctl daemon-reload && sudo systemctl enable --now telegram_heart
 journalctl -u telegram_heart -f
 ```
+
+## Working agreements
+
+- Work inline. Use subagents only when the work truly needs it (large, independent, context not already loaded),
+  say why in one line first, and prefer one at a time.
+- Telegram noise matters to the user: the bridge forwards device messages to Telegram, so the beacon publishes
+  `Online` only on the first MQTT connect of a power-on / button boot (never on reconnects or scheduled wakes),
+  `details` only on those boots or on request, and `BATT_STATUS` every 6 h plus once when the battery first goes
+  low. Don't add new periodic publishes on the shared topic.
 
 ## Repo conventions
 
