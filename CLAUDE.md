@@ -62,6 +62,12 @@ g++ -std=c++17 -Wall -Wextra -Werror -o /tmp/test_logic Code/test/test_logic.cpp
   USB-Serial/JTAG; use `esptool ... --after hard-reset chip-id` to reboot it. The port disappears in deep sleep.
 - Verify a deploy: boot banner `Heart beacon <ver>` on serial, then the device's own publishes on the topic with
   `retain=0` (`mosquitto_sub -F '%I retain=%r %p'`; `mosquitto-clients` is in WSL Ubuntu-20.04).
+- Schedule bench test: also append `OFFICE_DAYS 0x7F`, `OFFICE_START_MIN`/`OFFICE_STOP_MIN` a few minutes ahead
+  and `MAX_SLEEP_S 120UL` to the build copy's `credential.h`. A sleeping beacon is only on USB for ~4 s per
+  check-in: flash it by polling for COM6 and running `esptool ... --before default-reset write-flash 0x10000
+  <app.bin>` the moment it appears (the reset holds it in the bootloader).
+- The broker log is the ground truth for "did it connect / why did it drop" (clean `disconnected` = the firmware
+  chose to sleep). The user's other session `health_dash` can read it, with the user's OK.
 
 ## OTA
 
@@ -103,20 +109,32 @@ binds to `publish(topic, payload, retained = n != 0)`. Firmware <= 0.0.9 retaine
 live topic still holds a stale retained device message until someone clears it (`mosquitto_pub -r -n -t <topic>`).
 MQTT buffer is 1024 B (`setBufferSize`); longer bridge messages are still dropped.
 
-## Firmware runtime model (0.1.1)
+## Firmware runtime model (0.1.2)
 
-- `setup()`: CPU 80 MHz, low-battery check, battery bar (skipped on timer wake), WiFi, OTA check, MQTT config.
-  WiFi: `WIFI_PS_MAX_MODEM`, `persistent(false)`. `connect_wifi()` first tries the last AP's BSSID + channel from
-  RTC memory (`cached_*`, survives deep sleep), then one scan trying each known SSID once.
+- `setup()`: CPU 80 MHz, low-battery check, battery bar (skipped on timer wake), WiFi, NTP (`configTzTime`,
+  IST), timed-sleep check, OTA check, MQTT config. WiFi: `WIFI_PS_MAX_MODEM`, `persistent(false)`.
+  `connect_wifi()` first tries the last AP's BSSID + channel from RTC memory (`cached_*`, survives deep sleep),
+  then one scan trying each known SSID once.
+- **Office hours** Mon-Sat 09:00-19:00 IST (`OFFICE_DAYS` / `OFFICE_START_MIN` / `OFFICE_STOP_MIN`, logic in
+  `beacon_logic.h` `Schedule`). Outside them the beacon deep-sleeps until the next start (`sleep_until`, RTC
+  `wake_at`), waking every `MAX_SLEEP_S` (3 h) for a few seconds to resync NTP without touching MQTT, so nothing
+  plays at night; queued hearts play at 09:00. After power-on or a button press it stays up 5 min first.
+  `GO_DEEP_SLEEP` sleeps until the next office start (or button). Unknown clock = stay awake.
 - Offline handling never reboots: no WiFi at boot (3 rounds, 1 on timer wake) or no MQTT for 5 min in `loop()` ->
-  deep sleep with a 15 min timer + button wake. A timer wake is "quiet" (no animations, one attempt).
+  deep sleep, retrying after 1, 3, then 15 min (`offline_retry_s`, RTC `offline_fails`, reset on MQTT connect);
+  out of hours it sleeps to the next start instead. A timer wake is "quiet" (no animations, one attempt, no
+  details publish).
+- Diagnostics that survive sleep (USB serial drops after a few sleep cycles, so don't rely on it): `last_sleep`
+  (reason, time, duration) and the previous boot's breadcrumb trail (`B<cause>` `W/w` wifi `T/t` clock `O` ota
+  `M/m<rc>` mqtt). Both print at boot and ride in the `details` reply.
 - `loop()`: 10 ms tick; periodic work uses `every()` on `millis()` (battery check 15 s, `BATT_STATUS` 30 min).
   MQTT reconnect is one attempt per 5 s, so the button keeps working while offline.
 - Commands from `callback()` set `STATUS_FLAG` / `SLEEP_FLAG`; `loop()` acts on them. LED effects run inline
   inside `callback()` (~3 s blocking).
 - Button (GPIO0, active low) via `Button` in `beacon_logic.h`: tap (< 600 ms) = send `Miss you` (queued in RTC
   memory as `pending_heart` if offline); hold = battery bar. The wake-up press is swallowed.
-- Deep sleep: on `GO_DEEP_SLEEP` or battery <= 3.3 V (button wake only), or offline (timer + button).
+- Deep sleep: out of office hours / `GO_DEEP_SLEEP` (timer to next start + button), battery <= 3.3 V (button
+  only), offline (backoff timer + button).
 - MQTT: stable client ID `heart-<MAC without colons>`, persistent session (cleanSession=false), QoS 1 subscribe,
   keepalive 60 s, clean `disconnect()` before deep sleep, so the broker queues messages while the beacon is away.
   Beacons publish QoS 0 (PubSubClient limit), so the broker needs `queue_qos0_messages true` for beacon-to-beacon
