@@ -95,6 +95,13 @@ class MainActivity : ComponentActivity() {
         setContent { HeartTheme { AppRoot(app, start, step, ::findBeacon) } }
     }
 
+    // uiMode is handled here (Appearance setting, system dark mode): Compose re-themes itself; only the system bar
+    // scrims are chosen once, so pick them again.
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        enableEdgeToEdge()
+    }
+
     private fun findBeacon(vm: AddDeviceVm) {
         val app = application as App
         if (app.repo is FakeRepo) return vm.paired(null)

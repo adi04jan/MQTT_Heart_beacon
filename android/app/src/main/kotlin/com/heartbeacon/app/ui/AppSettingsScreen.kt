@@ -1,5 +1,9 @@
 package com.heartbeacon.app.ui
 
+import com.heartbeacon.app.data.Appearance
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
@@ -41,6 +45,7 @@ class AppSettingsVm(private val repo: HeartRepo, private val store: SettingsStor
     val server = repo.server
     val local = store.flow
     fun notify(m: Mood, on: Boolean) = viewModelScope.launch { store.setNotify(m, on) }
+    fun appearance(a: Appearance) = viewModelScope.launch { store.setAppearance(a) }
     fun logout() = repo.logout()
 }
 
@@ -79,6 +84,22 @@ fun AppSettingsScreen(vm: AppSettingsVm, onBack: () -> Unit) {
     SurfaceStatusBar()
     Scaffold(topBar = { BackBar("Settings", onBack) }) { pad ->
         LazyColumn(Modifier.fillMaxSize().padding(bottom = pad.calculateBottomPadding()), contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = Space.xxl)) {
+            item { SectionTitle("Appearance") }
+            item {
+                Group {
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(Space.l)) {
+                        Appearance.entries.forEachIndexed { i, a ->
+                            SegmentedButton(
+                                selected = (local?.appearance ?: Appearance.SYSTEM) == a,
+                                onClick = { vm.appearance(a) },
+                                shape = SegmentedButtonDefaults.itemShape(i, Appearance.entries.size),
+                                label = { Text(when (a) { Appearance.SYSTEM -> "Phone"; Appearance.LIGHT -> "Light"; Appearance.DARK -> "Dark" }) },
+                            )
+                        }
+                    }
+                }
+            }
+
             item { SectionTitle("Notifications") }
             item {
                 Group {
