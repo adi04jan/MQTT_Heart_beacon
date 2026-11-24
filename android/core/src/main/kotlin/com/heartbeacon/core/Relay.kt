@@ -38,9 +38,11 @@ sealed interface RelayOut {
  *   the router has already retried on the other path, so a late copy is dropped, not replayed. A `relay`
  *   holding the beacon's own `state` / `tele` is device status for the app and never goes to the beacon;
  *   one holding a `cfg` is dropped (the app writes the signed `cfg` it got from the API itself).
+ * - No beacon yet ([did] null: none claimed, or pairing before the claim): moods and the app's own BLE
+ *   requests work; there is no `link` to report and nothing of the beacon's to relay.
  */
 class RelayEngine(
-    private val did: String,
+    private val did: String?,
     uid: String,
     private val newId: () -> String = Ids::random,
     private val tzMin: () -> Int = { 0 },
@@ -73,7 +75,7 @@ class RelayEngine(
         serverUp = up
         val out = mutableListOf<RelayOut>()
         if (up) {
-            out += publish(env("link", now, "did" to JsonPrimitive(did), "ble" to JsonPrimitive(bleUp)), now)
+            if (did != null) out += publish(env("link", now, "did" to JsonPrimitive(did), "ble" to JsonPrimitive(bleUp)), now)
             while (outbox.isNotEmpty()) out += publish(outbox.removeFirst(), now)
         } else {
             requeueInflight()
@@ -95,7 +97,7 @@ class RelayEngine(
             held.filter { now - it.at <= DOWN_HOLD_MS }.forEach { out += toBeacon(it.msg) }
             held.clear()
         }
-        if (serverUp) out += publish(env("link", now, "did" to JsonPrimitive(did), "ble" to JsonPrimitive(up)), now)
+        if (serverUp && did != null) out += publish(env("link", now, "did" to JsonPrimitive(did), "ble" to JsonPrimitive(up)), now)
         return out
     }
 
@@ -112,6 +114,7 @@ class RelayEngine(
         if (msg.t == "resp" && ownRequests.remove(msg.body["re"]?.jsonPrimitive?.content)) {
             return listOf(RelayOut.Local(msg))
         }
+        val did = did ?: return emptyList() // not claimed yet: the router would not take it
         val wrapped = try {
             env("relay", now, "did" to JsonPrimitive(did), "m" to Json.parseToJsonElement(raw.decodeToString()).jsonObject)
                 .let { Queued(it.id, it.payload, ackRe = msg.id) }
@@ -150,13 +153,13 @@ class RelayEngine(
         return emptyList()
     }
 
-    /** The app's own Heart / Sorry / Annoy. Works with no beacon at all. */
-    fun sendMood(k: String, now: Long): List<RelayOut> = uplink(env("mood", now, "k" to JsonPrimitive(k)), now)
+    /** The app's own Heart / Sorry / Annoy. Works with no beacon at all. [id] is the event id `rcpt` will carry. */
+    fun sendMood(k: String, now: Long, id: String = newId()): List<RelayOut> =
+        uplink(env("mood", now, "k" to JsonPrimitive(k), id = id), now)
 
     /** A request from the app to the beacon (`get`, `wifi.*`, `claim`, ...); its `resp` comes back as [RelayOut.Local]. */
-    fun request(t: String, body: JsonObject, now: Long): List<RelayOut> {
+    fun request(t: String, body: JsonObject, now: Long, id: String = newId()): List<RelayOut> {
         if (!bleUp) return emptyList()
-        val id = newId()
         ownRequests += id
         if (ownRequests.size > 16) ownRequests.remove(ownRequests.first())
         return listOf(toBeacon(Envelope.encode(t, id, now / 1000, body)))
@@ -210,8 +213,7 @@ class RelayEngine(
 
     private fun toBeacon(q: Queued) = toBeacon(q.payload)
 
-    private fun env(t: String, now: Long, vararg body: Pair<String, kotlinx.serialization.json.JsonElement>): Queued {
-        val id = newId()
+    private fun env(t: String, now: Long, vararg body: Pair<String, kotlinx.serialization.json.JsonElement>, id: String = newId()): Queued {
         return Queued(id, Envelope.encode(t, id, now / 1000, buildJsonObject { body.forEach { (k, v) -> put(k, v) } }))
     }
 
