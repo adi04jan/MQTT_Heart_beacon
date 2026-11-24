@@ -34,7 +34,7 @@ def main(argv=None) -> None:
     args = ap.parse_args(argv)
 
     env = os.environ
-    router_pass = _router_pass(env.get("HB_ROUTER_PASS", "/var/lib/hb/router.pass"))
+    router_pass = _router_pass(env.get("HB_ROUTER_PASS", "/etc/hb/router.pass"))
     ctx = api.Ctx(
         db=Db(env.get("HB_DB", "/var/lib/hb/hb.db")),
         key=signing.load_key(env.get("HB_CFG_KEY", "/etc/hb/cfg-sign.key")),

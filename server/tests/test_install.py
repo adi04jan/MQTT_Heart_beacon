@@ -78,7 +78,7 @@ def test_dry_run_prints_the_whole_plan_and_runs_nothing():
     acts = [ln[2:] for ln in out.splitlines() if ln.startswith("+ ")]
     assert "# dry run" in out and len(acts) >= 12
     for want in ("useradd --system", "/install.sh | env UV_UNMANAGED_INSTALL=/opt/hb/bin sh", "uv venv --python 3.12",
-                 f"mkca.sh {IP} /root/hb-pki", "install -o hb -g hb -m 600 $t/p /var/lib/hb/router.pass",
+                 f"mkca.sh {IP} /root/hb-pki", "install -o root -g hb -m 640 $t/p /etc/hb/router.pass",
                  "install -d -o root -g hb -m 750 /etc/hb", "install -o root -g hb -m 640 /root/hb-pki/ca.crt",
                  f"s/^HB_HOSTS=.*/HB_HOSTS={IP}/", "systemctl enable hb-mosquitto hb-server"):
         assert any(want in a for a in acts), want
@@ -95,8 +95,8 @@ PREFIX = 'r=$(mktemp -d)\ntrap \'rm -rf "$r"\' EXIT\n'  # a temp root prefix, re
 
 
 def test_a_symlink_planted_where_root_writes_is_refused():
-    rc, out = sh(PREFIX + "VAR=$r/var/lib/hb\nmkdir -p $VAR\nln -s /etc/passwd $VAR/router.pass 2>/dev/null || true\n"
-                 "[ -L $VAR/router.pass ] || { echo NOSYMLINK; exit 0; }\n"
+    rc, out = sh(PREFIX + "ETC=$r/etc/hb\nmkdir -p $ETC\nln -s /etc/passwd $ETC/router.pass 2>/dev/null || true\n"
+                 "[ -L $ETC/router.pass ] || { echo NOSYMLINK; exit 0; }\n"
                  f"run() {{ echo \"RAN $1\"; }}\nmain {IP}")
     if "NOSYMLINK" in out:
         pytest.skip("this bash cannot make symlinks (Git Bash without native links); runs in WSL / Linux")

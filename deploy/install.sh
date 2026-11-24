@@ -76,11 +76,11 @@ check_paths() {
 }
 
 # Everything root writes or chowns: root-owned trees ($ETC is root:hb 0750, its files root:hb 0640, so hb can read
-# but not plant), and the only hb-owned paths root touches ($VAR, $MQVAR, router.pass).
+# but not plant), and the only hb-owned paths root touches ($VAR, $MQVAR: created, never written into).
 safe_paths() {
   check_paths 0 $OPT $MQ $ETC "$PKI" $MQ/mosquitto-hb.conf $MQ/acl $UNITS/hb-mosquitto.service \
-    $UNITS/hb-server.service $ETC/{ca.crt,leaf.crt,leaf.key,cfg-sign.key,cfg-sign.pub,hb-server.env}
-  check_paths "$(id -u hb 2>/dev/null || echo none)" $VAR $MQVAR $VAR/router.pass
+    $UNITS/hb-server.service $ETC/{ca.crt,leaf.crt,leaf.key,cfg-sign.key,cfg-sign.pub,hb-server.env,router.pass}
+  check_paths "$(id -u hb 2>/dev/null || echo none)" $VAR $MQVAR
 }
 
 # Installed leaf chains to the installed CA, carries IP SAN $1 and is good for 30 more days.
@@ -125,10 +125,10 @@ plan() {
       run "install -o root -g hb -m 640 $PKI/cfg-sign.key $ETC/"
     fi
   fi
-  # router's broker password (the server hashes it into the password file). hb owns it, so it is made in a
-  # root-only temp dir and installed fresh: never written through whatever sits at the target.
-  if [ ! -e $VAR/router.pass ]; then
-    run "t=\$(mktemp -d) && openssl rand -hex 32 > \$t/p && rm -f $VAR/router.pass && install -o hb -g hb -m 600 \$t/p $VAR/router.pass && rm -r \$t"
+  # router's broker password (the server hashes it into the password file). Lives in root-owned $ETC (root:hb
+  # 0640, read-only to hb), so root never writes or chowns inside an hb-controlled directory: no symlink race.
+  if [ ! -e $ETC/router.pass ]; then
+    run "t=\$(mktemp -d) && openssl rand -hex 32 > \$t/p && install -o root -g hb -m 640 \$t/p $ETC/router.pass && rm -r \$t"
   fi
   # broker config, server settings, units
   run "install -m 644 $OPT/deploy/mosquitto-hb.conf $OPT/deploy/acl $MQ/"
