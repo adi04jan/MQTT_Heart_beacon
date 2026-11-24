@@ -34,7 +34,7 @@ def tick(st, now):
 
 def up(st, did, path="wifi", now=1000):
     """Beacon reports itself reachable on `path`."""
-    raw = env("state", "f" * 16, st="AWAY" if path == "wifi" else "NEAR", path=path)
+    raw = env("state", "f" * 16, st="away" if path == "wifi" else "near", path=path)
     if path == "wifi":
         return send(st, f"hb/v1/d/{did}/state", raw, now)
     owner = st.beacons[did].owner
@@ -126,7 +126,7 @@ def test_shown_stops_retry_and_sends_receipt():
 
 def test_queued_while_asleep_flushes_on_state_up():
     st = mkstate()
-    send(st, f"hb/v1/d/{B}/state", env("state", "3" * 16, st="SLEEP", path="wifi", wake=5000), now=900)
+    send(st, f"hb/v1/d/{B}/state", env("state", "3" * 16, st="sleep", path="wifi", wake=5000), now=900)
     pubs = send(st, "hb/v1/u/alice/up", env("mood", EID, k="heart"), now=1000)
     assert not only(pubs, f"hb/v1/d/{B}/down") and st.deliveries[0].status == "pending"
     woke = up(st, B, "wifi", now=5000)
@@ -237,7 +237,7 @@ def test_reclaim_by_another_user_expires_the_old_owners_queue():
     st.users["dave"] = User("dave", "Dave", "other")
     up(st, B, "ble", now=1000)  # bob's phone carries B
     send(st, "hb/v1/u/alice/up", env("mood", EID, k="heart"), now=1000)  # in flight to bob over BLE
-    send(st, f"hb/v1/d/{B}/state", env("state", "9" * 16, st="SLEEP", path="wifi"), now=1001)
+    send(st, f"hb/v1/d/{B}/state", env("state", "9" * 16, st="sleep", path="wifi"), now=1001)
     send(st, "hb/v1/u/alice/up", env("mood", "00000000000000bb", k="sorry"), now=1002)  # queued
     users = list(st.users.values())
     moved = route(Directory(users, [(A, "alice", 330), (B, "dave", 0), (C, "carol", 0)], 1003), st)  # B -> dave
@@ -246,7 +246,9 @@ def test_reclaim_by_another_user_expires_the_old_owners_queue():
         ("hb/v1/u/alice/down", EID, "expired"), ("hb/v1/u/alice/down", "00000000000000bb", "expired")]
     later = tick(st, 1020) + up(st, B, "wifi", now=1030) + send(st, f"hb/v1/d/{B}/up", env("shown", EID), now=1031)
     later += tick(st, 1060)
-    assert [t for t, *_ in later if not t.endswith(f"{B}/down")] == []  # nothing to bob, no rcpt at all
+    # nothing to bob, no rcpt at all: only device status, to the new owner
+    assert [(t, p["t"], p["m"]["t"]) for t, p, *_ in later if not t.endswith(f"{B}/down")] == [
+        ("hb/v1/u/dave/down", "relay", "state")]
     assert [p["t"] for t, p, *_ in later if t.endswith(f"{B}/down")] == ["time"]  # no old show reaches dave's B
 
 
@@ -301,3 +303,47 @@ def test_queue_survives_restart(tmp_path):
     assert [(d.eid, d.did, d.status) for d in st2.deliveries] == [(EID, B, "pending")]
     assert send(st2, "hb/v1/u/alice/up", env("mood", EID, k="heart"), now=2001) == []  # dedupe survives too
     assert only(up(st2, B, now=2002), f"hb/v1/d/{B}/down")[0]["id"] == EID
+
+
+def test_state_st_must_be_an_exact_lowercase_name():
+    st = mkstate()
+    for bad in ("NEAR", "Away", "awake", ""):
+        pubs = send(st, f"hb/v1/d/{B}/state", env("state", "a" * 16, st=bad, path="wifi"))
+        assert pubs == [] and st.beacons[B].live() is None, bad  # dropped: no time, no status, no path
+    for good in models.STATES:
+        assert send(st, f"hb/v1/d/{B}/state", env("state", "b" * 16, st=good, path="wifi")), good
+    assert st.beacons[B].st == "lowbatt"
+
+
+def test_state_and_tele_reach_the_owner_phone_as_relay():
+    st = mkstate()
+    pubs = send(st, f"hb/v1/d/{B}/state", env("state", "c" * 16, st="away", path="wifi", wake=0, junk=[1]))
+    relays = [p for p in only(pubs, "hb/v1/u/bob/down") if p["t"] == "relay"]
+    assert relays == [{"v": 1, "t": "relay", "id": relays[0]["id"], "ts": 1000, "did": B,
+                       "m": {"v": 1, "t": "state", "id": "c" * 16, "ts": 0, "st": "away", "path": "wifi", "wake": 0}}]
+    pubs = send(st, f"hb/v1/d/{B}/up", env("tele", "d" * 16, mv=3912, pct=71, fw="2.0.0", heap=[1]), now=1001)
+    assert [p["m"] for p in only(pubs, "hb/v1/u/bob/down")] == [
+        {"v": 1, "t": "tele", "id": "d" * 16, "ts": 0, "mv": 3912, "pct": 71, "fw": "2.0.0"}]  # as stored
+    lwt = send(st, f"hb/v1/d/{B}/state", env("state", "e" * 16, st="lost"), now=1002)
+    assert [p["m"]["st"] for p in only(lwt, "hb/v1/u/bob/down")] == ["lost"]
+    # Over BLE (relayed up by bob's phone) it comes back down too, keeping the beacon's id.
+    tele = json.loads(env("tele", "f" * 16, mv=3900))
+    back = send(st, "hb/v1/u/bob/up", env("relay", "1" * 16, did=B, m=tele), now=1003)
+    assert [p["m"]["id"] for p in only(back, "hb/v1/u/bob/down")] == ["f" * 16]
+    assert all("alice" not in t and "carol" not in t for t, *_ in pubs + lwt + back)
+
+
+def test_mood_from_is_the_senders_display_name():
+    st = mkstate()
+    st.users["alice"].name = "Asha ♥"
+    pubs = send(st, "hb/v1/u/alice/up", env("mood", EID, k="heart"))
+    assert [p["from"] for p in only(pubs, "hb/v1/u/bob/down")] == ["Asha ♥"]  # not the uid
+
+
+def test_cfg_is_never_sent_in_a_relay():
+    from hb_server import router
+    st, out = mkstate(), []
+    router._send(st, st.beacons[B], "ble", env("cfg", "2" * 16, n=1, b="e30", s="x"), 1000, out)
+    assert out == []
+    router._send(st, st.beacons[B], "ble", env("show", "3" * 16, k="heart"), 1000, out)
+    assert [json.loads(p.payload)["m"]["t"] for p in out] == ["show"]

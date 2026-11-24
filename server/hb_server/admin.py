@@ -15,7 +15,7 @@ from .router import _tele
 
 IST = timezone(timedelta(minutes=330), "IST")
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-# (block, heading, [(key, label, hint)]); keys follow models.CONFIG_DEFAULTS. net.wifi is never signed (api).
+# (block, heading, [(key, label, hint)]); keys follow models.CONFIG_DEFAULTS.
 FORM = [
     ("name", "Identity", [("name", "Name", "Shown in the app, up to 32 bytes")]),
     ("sched", "Schedule", [("sched.on", "Office hours on", "Off means always on"),

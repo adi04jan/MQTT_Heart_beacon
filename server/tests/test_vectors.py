@@ -92,3 +92,42 @@ def test_config_parse(v):
         assert e.value.code == v["err"]
     else:
         assert m.parse_config(raw) == v["cfg"]
+
+
+def test_state_names():
+    assert m.STATES == tuple(ENV["states"]) and m.LWT_STATE == ENV["lwt_state"]
+
+
+@by_name(ENV["size"])
+def test_size_limits(v):
+    """The server is not a beacon encoder: it checks the 1024 B limit; `relay_of_896_fits` is the headroom."""
+    if v["ok"]:
+        assert len(m.encode(v["t"], v["id"], v["ts"], v["body"])) == v["bytes"]
+    else:
+        with pytest.raises(m.ProtocolError):
+            m.encode(v["t"], v["id"], v["ts"], v["body"])
+
+
+SIG = CFG["signature"]
+
+
+@by_name(SIG["verify"])
+def test_signature_vectors(v):
+    from cryptography.hazmat.primitives import serialization
+    from hb_server import signing
+    pub = serialization.load_der_public_key(bytes.fromhex(SIG["pub_spki_hex"]))
+    assert signing.verify(pub, signing.unb64u(v["b"]), v["s"]) is v["ok"]
+
+
+def test_signing_writes_der_in_unpadded_base64url():
+    import re
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+    from hb_server import signing
+    key = ec.generate_private_key(ec.SECP256R1())
+    raw = b'{"cv":1,"n":1,"did":"HB-3FA2C1"}'
+    s = signing.sign(key, raw)
+    assert re.fullmatch(r"[A-Za-z0-9_-]+", s)  # base64url, no padding
+    der = signing.unb64u(s)
+    assert der[0] == 0x30 and 70 <= len(der) <= 72 and decode_dss_signature(der)  # DER SEQUENCE {r, s}
+    assert signing.verify(key.public_key(), raw, s) and not signing.verify(key.public_key(), raw + b" ", s)

@@ -78,7 +78,7 @@ def test_config_edit_signs_and_publishes(e):
     env = json.loads(e.pubs[-1].payload)
     got = models.parse_config(signing.unb64u(env["b"]))
     assert (got["name"], got["led"]["bright"], got["sched"]["stop"], got["sched"]["days"]) == ("Desk", 35, "18:30", "1111100")
-    assert got["net"]["wifi"] == [] and e.pubs[-1].retain
+    assert "wifi" not in got["net"] and e.pubs[-1].retain
     assert "Saved and published" in e.c.get(f"/d/{A}?saved=1").text
 
 

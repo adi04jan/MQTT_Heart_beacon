@@ -11,7 +11,8 @@ delivery waits for it to show up again. Undelivered after 24 h: expired. The sen
 queued / shown / expired per target beacon. Same `k` to the same beacon is played once per burst: joins a show
 still in flight or started < 3 s ago, and a flush on wake plays each `k` once. A delivery is bound to the
 beacon's owner when it was made: if the beacon changes owner, is unclaimed, or owner and sender stop sharing a
-circle, it expires instead of reaching the new owner.
+circle, it expires instead of reaching the new owner. Every `state` and `tele` accepted from a beacon is
+forwarded to its owner's phone as `relay{did, m}` (device status); a `cfg` never goes in a `relay`.
 
 Every field read from a payload is type-checked before it is used as a key: untrusted input never raises.
 """
@@ -179,7 +180,7 @@ def _from_beacon(st, did, env, path, now, out):
         return
     b.last_seen, b.dirty = now, True
     if env.t == "state":
-        _beacon_state(st, b, env.body, path, now, out)
+        _beacon_state(st, b, env, path, now, out)
         return
     _links(st, b, now, out, **{path: True}, path=path)  # hearing from it proves the path
     if env.t == "mood":
@@ -189,12 +190,16 @@ def _from_beacon(st, did, env, path, now, out):
         _shown(st, did, env.id, now, out)
     elif env.t == "tele":
         b.tele = _tele(env.body)
+        _status(st, b, env, b.tele, now, out)
     elif env.t not in models.TYPES:
         _send(st, b, path, models.unknown_t_response(env, st.new_id(), now), now, out)
 
 
-def _beacon_state(st, b, body, path, now, out):
-    s = (_str(body, "st") or "").lower()
+def _beacon_state(st, b, env, path, now, out):
+    body = env.body
+    s = _str(body, "st")
+    if s not in models.STATES and s != models.LWT_STATE:  # exact lowercase names only (PROTOCOL.md 3)
+        return
     p = _str(body, "path") if _str(body, "path") in ("wifi", "ble") else path
     b.st = s
     wake = body.get("wake")
@@ -207,6 +212,19 @@ def _beacon_state(st, b, body, path, now, out):
             out.append(Pub(f"hb/v1/d/{b.did}/down", models.encode("time", st.new_id(), now, {"tz": b.tz})))
     else:  # going to deep sleep, offline or pairing
         _links(st, b, now, out, wifi=False, ble=False)
+    fwd = {"st": s}
+    if _str(body, "path") in ("wifi", "ble"):
+        fwd["path"] = body["path"]
+    if "wake" in body:
+        fwd["wake"] = b.wake
+    _status(st, b, env, fwd, now, out)
+
+
+def _status(st, b, env, body, now, out):
+    """Device status for the owner's phone (PROTOCOL.md 4): the beacon's message, keeping its id, with only
+    the fields the router accepted."""
+    m = {"v": 1, "t": env.t, "id": env.id, "ts": env.ts, **body}
+    out.append(Pub(f"hb/v1/u/{b.owner}/down", models.encode("relay", st.new_id(), now, {"did": b.did, "m": m})))
 
 
 def _from_phone(st, uid, env, now, out):
@@ -325,8 +343,10 @@ def _send(st, b, path, raw, now, out):
     if path == "wifi":
         out.append(Pub(f"hb/v1/d/{b.did}/down", raw))
     else:
-        body = {"did": b.did, "m": json.loads(raw)}
-        out.append(Pub(f"hb/v1/u/{b.owner}/down", models.encode("relay", st.new_id(), now, body)))
+        m = json.loads(raw)
+        if m["t"] == "cfg":  # the phone gets the signed cfg from the API, never in a relay (PROTOCOL.md 7)
+            return
+        out.append(Pub(f"hb/v1/u/{b.owner}/down", models.encode("relay", st.new_id(), now, {"did": b.did, "m": m})))
 
 
 def _rcpt(st, d, status, now, out):

@@ -117,9 +117,7 @@ def push_config(ctx: Ctx, did: str, cfg: dict) -> dict:
     if row is None:
         raise KeyError(did)
     cfg = {**cfg, "cv": 1, "n": row["cfg_n"] + 1, "did": did}
-    if isinstance(cfg.get("net"), dict):
-        # Never sign WiFi PSKs: the envelope goes to the owner's phone. WiFi is provisioned over BLE only.
-        cfg["net"] = {**cfg["net"], "wifi": []}
+    # parse_config drops unknown keys, net.wifi among them: no PSK is ever signed or reaches the phone.
     raw = signing.config_bytes(models.parse_config(signing.config_bytes(cfg)))
     env = signing.cfg_envelope(ctx.key, raw, ctx.new_id(), int(ctx.clock()))
     ctx.db.x("UPDATE device SET cfg_n = ?, cfg = ?, cfg_env = ? WHERE did = ?",

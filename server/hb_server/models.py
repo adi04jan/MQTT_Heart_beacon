@@ -11,6 +11,9 @@ TYPES = frozenset({
     "mood", "show", "shown", "rcpt", "tele", "state", "cfg", "time", "sleep", "get", "resp",
     "claim", "wifi.scan", "wifi.list", "wifi.set", "wifi.forget", "wifi.use", "link", "relay", "reset",
 })
+# `state.st` values (PROTOCOL.md 3), exact and lowercase; LWT_STATE only as the broker-published will.
+STATES = ("pairing", "near", "away", "offline", "nap", "sleep", "lowbatt")
+LWT_STATE = "lost"
 _HEADER = ("v", "t", "id", "ts")
 _ID = re.compile(r"[0-9a-f]{16}")
 
@@ -175,13 +178,13 @@ _SCHEMA = {
               "days": ("1111100", lambda v: isinstance(v, str) and bool(_DAYS.fullmatch(v))),
               "start": ("09:00", lambda v: isinstance(v, str) and bool(_HHMM.fullmatch(v))),
               "stop": ("19:00", lambda v: isinstance(v, str) and bool(_HHMM.fullmatch(v)))},
-    "pwr": {"idle_nap_min": (90, _int(0, 1440)), "nap_wake_min": (15, _int(1, 1440)),
+    "pwr": {"idle_nap_min": (0, _int(0, 1440)), "nap_wake_min": (15, _int(1, 1440)),
             "batt_low_mv": (3450, _mv), "batt_off_mv": (3300, _mv), "batt_cal_ppm": (0, _int(-200000, 200000))},
     "ble": {"adv_fast_ms": (100, _int(20, 10240)), "adv_fast_s": (30, _int(0, 600)),
             "adv_slow_ms": (500, _int(20, 10240)), "conn_ms": (500, _int(8, 4000)),
             "latency": (3, _int(0, 499)), "sup_ms": (6000, _int(100, 32000))},
     "net": {"use_wifi": (True, _is_bool), "near_hold_s": (30, _int(0, 3600)), "away_grace_s": (60, _int(0, 3600)),
-            "tele_min": (30, _int(1, 1440)), "wifi": ([], None)},  # wifi checked in _wifi()
+            "tele_min": (30, _int(1, 1440))},  # no WiFi here: PSKs go over BLE only (PROTOCOL.md 7)
     "fw": {"ver": ("", _text(0, 16)), "path": ("", _text(0, 96)),
            "sha256": ("", lambda v: v == "" or (isinstance(v, str) and bool(_SHA.fullmatch(v)))),
            "min_mv": (3700, _mv)},
@@ -189,21 +192,6 @@ _SCHEMA = {
 
 CONFIG_DEFAULTS = {k: ({kk: d for kk, (d, _) in s.items()} if isinstance(s, dict) else s[0])
                    for k, s in _SCHEMA.items()}
-
-
-def _wifi(v):
-    """Normalised network list, or None if invalid."""
-    if not isinstance(v, list) or len(v) > 4:
-        return None
-    out = []
-    for net in v:
-        if not isinstance(net, dict):
-            return None
-        ssid, psk = net.get("ssid"), net.get("psk", "")
-        if not _text(1, 32)(ssid) or not (psk == "" or _text(8, 63)(psk)):
-            return None
-        out.append({"ssid": ssid, "psk": psk})
-    return out
 
 
 def parse_config(raw: bytes) -> dict:
@@ -234,11 +222,7 @@ def parse_config(raw: bytes) -> dict:
         block = {}
         for key, (default, ok) in spec.items():
             v = given.get(key, copy.deepcopy(default))
-            if ok is None:
-                v = _wifi(v)
-                if v is None:
-                    raise ProtocolError(f"{name}.{key}")
-            elif not ok(v):
+            if not ok(v):
                 raise ProtocolError(f"{name}.{key}")
             block[key] = v
         if name == "pwr" and block["batt_off_mv"] >= block["batt_low_mv"]:

@@ -219,9 +219,11 @@ def test_generated_passwords_are_long(e):
 def test_wifi_psks_never_enter_a_signed_config(e):
     claimer(e)(A, login(e, "alice"))
     cfg = api.current_config(e.ctx, A)
+    assert "wifi" not in cfg["net"]  # not in the schema at all (PROTOCOL.md 7)
     cfg["net"]["wifi"] = [{"ssid": "Office", "psk": "secret-psk-123"}]
     env = api.push_config(e.ctx, A, cfg)
-    assert b"secret" not in signing.unb64u(env["b"]) and models.parse_config(signing.unb64u(env["b"]))["net"]["wifi"] == []
+    raw = signing.unb64u(env["b"])
+    assert b"secret" not in raw and b'"wifi"' not in raw and "wifi" not in models.parse_config(raw)["net"]
 
 
 def test_settings_user_keys_only_and_signed_publish(e):
@@ -230,7 +232,7 @@ def test_settings_user_keys_only_and_signed_publish(e):
     s = e.c.get(f"/api/v1/devices/{A}/settings", headers=h).json()
     assert s == {"n": 1, "name": "", "led": {"bright": 60},
                  "sched": {"days": "1111110", "on": True, "start": "09:00", "stop": "19:00", "tz": 330},
-                 "pwr": {"idle_nap_min": 90}, "net": {"use_wifi": True}}
+                 "pwr": {"idle_nap_min": 0}, "net": {"use_wifi": True}}
     e.pubs.clear()
     r = e.c.patch(f"/api/v1/devices/{A}/settings", headers=h, json={"name": "Desk", "sched": {"stop": "18:30"}})
     assert r.status_code == 200, r.text
