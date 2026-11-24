@@ -2,6 +2,7 @@
   "_doc": "Golden vectors for protocol/PROTOCOL.md. Strings are UTF-8; *_hex fields and frames are lowercase hex bytes.",
   "envelope": {
     "max_bytes": 1024,
+    "max_beacon_bytes": 896,
     "types": [
       "mood",
       "show",
@@ -24,6 +25,16 @@
       "relay",
       "reset"
     ],
+    "states": [
+      "pairing",
+      "near",
+      "away",
+      "offline",
+      "nap",
+      "sleep",
+      "lowbatt"
+    ],
+    "lwt_state": "lost",
     "encode": [
       {
         "name": "mood_heart",
@@ -36,15 +47,15 @@
         "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":1795000000,\"k\":\"heart\"}"
       },
       {
-        "name": "mood_from_router",
+        "name": "mood_from_router_display_name",
         "t": "mood",
         "id": "0123456789abcdef",
         "ts": 1795000000,
         "body": {
           "k": "annoy",
-          "from": "user1"
+          "from": "Asha ♥"
         },
-        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":1795000000,\"k\":\"annoy\",\"from\":\"user1\"}"
+        "json": "{\"v\":1,\"t\":\"mood\",\"id\":\"0123456789abcdef\",\"ts\":1795000000,\"k\":\"annoy\",\"from\":\"Asha ♥\"}"
       },
       {
         "name": "show",
@@ -167,6 +178,17 @@
         "json": "{\"v\":1,\"t\":\"resp\",\"id\":\"6666666666666666\",\"ts\":1795000000,\"re\":\"5555555555555555\",\"ok\":true,\"d\":{\"did\":\"HB-3FA2C1\",\"fw\":\"2.0.0\",\"hw\":\"A\",\"pv\":1,\"min_pv\":1,\"claimed\":false}}"
       },
       {
+        "name": "resp_relay_ack",
+        "t": "resp",
+        "id": "6666666666666667",
+        "ts": 1795000000,
+        "body": {
+          "re": "0123456789abcdef",
+          "ok": true
+        },
+        "json": "{\"v\":1,\"t\":\"resp\",\"id\":\"6666666666666667\",\"ts\":1795000000,\"re\":\"0123456789abcdef\",\"ok\":true}"
+      },
+      {
         "name": "wifi_set_utf8",
         "t": "wifi.set",
         "id": "7777777777777777",
@@ -178,7 +200,7 @@
         "json": "{\"v\":1,\"t\":\"wifi.set\",\"id\":\"7777777777777777\",\"ts\":0,\"ssid\":\"Café ♥ 5G\",\"psk\":\"päss w0rd!\"}"
       },
       {
-        "name": "link_up",
+        "name": "link_to_beacon",
         "t": "link",
         "id": "8888888888888888",
         "ts": 1795000000,
@@ -186,6 +208,17 @@
           "up": true
         },
         "json": "{\"v\":1,\"t\":\"link\",\"id\":\"8888888888888888\",\"ts\":1795000000,\"up\":true}"
+      },
+      {
+        "name": "link_to_router",
+        "t": "link",
+        "id": "8888888888888889",
+        "ts": 1795000000,
+        "body": {
+          "did": "HB-3FA2C1",
+          "ble": true
+        },
+        "json": "{\"v\":1,\"t\":\"link\",\"id\":\"8888888888888889\",\"ts\":1795000000,\"did\":\"HB-3FA2C1\",\"ble\":true}"
       },
       {
         "name": "relay_nested",
@@ -202,6 +235,25 @@
           }
         },
         "json": "{\"v\":1,\"t\":\"relay\",\"id\":\"9999999999999999\",\"ts\":1795000000,\"did\":\"HB-3FA2C1\",\"m\":{\"v\":1,\"t\":\"shown\",\"id\":\"0123456789abcdef\",\"ts\":0}}"
+      },
+      {
+        "name": "relay_state_to_phone",
+        "t": "relay",
+        "id": "999999999999999a",
+        "ts": 1795000000,
+        "body": {
+          "did": "HB-3FA2C1",
+          "m": {
+            "v": 1,
+            "t": "state",
+            "id": "1111111111111111",
+            "ts": 1795000000,
+            "st": "away",
+            "path": "wifi",
+            "wake": 0
+          }
+        },
+        "json": "{\"v\":1,\"t\":\"relay\",\"id\":\"999999999999999a\",\"ts\":1795000000,\"did\":\"HB-3FA2C1\",\"m\":{\"v\":1,\"t\":\"state\",\"id\":\"1111111111111111\",\"ts\":1795000000,\"st\":\"away\",\"path\":\"wifi\",\"wake\":0}}"
       },
       {
         "name": "reset_factory",
@@ -452,6 +504,78 @@
       {
         "mac": "ffffffffffff",
         "did": "HB-FFFFFF"
+      }
+    ],
+    "size": [
+      {
+        "name": "beacon_896_fits",
+        "t": "tele",
+        "id": "0123456789abcdef",
+        "ts": 4294967295,
+        "body": {
+          "fw": "2.0.0",
+          "pad": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "bytes": 896,
+        "beacon_ok": true,
+        "ok": true
+      },
+      {
+        "name": "beacon_897_refused",
+        "t": "tele",
+        "id": "0123456789abcdef",
+        "ts": 4294967295,
+        "body": {
+          "fw": "2.0.0",
+          "pad": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "bytes": 897,
+        "beacon_ok": false,
+        "ok": true
+      },
+      {
+        "name": "relay_of_896_fits",
+        "t": "relay",
+        "id": "ffffffffffffffff",
+        "ts": 4294967295,
+        "body": {
+          "did": "HB-FFFFFF",
+          "m": {
+            "v": 1,
+            "t": "tele",
+            "id": "0123456789abcdef",
+            "ts": 4294967295,
+            "fw": "2.0.0",
+            "pad": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        },
+        "bytes": 978,
+        "beacon_ok": false,
+        "ok": true
+      },
+      {
+        "name": "any_1024_fits",
+        "t": "mood",
+        "id": "0123456789abcdef",
+        "ts": 5,
+        "body": {
+          "pad": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "bytes": 1024,
+        "beacon_ok": false,
+        "ok": true
+      },
+      {
+        "name": "any_1025_refused",
+        "t": "mood",
+        "id": "0123456789abcdef",
+        "ts": 5,
+        "body": {
+          "pad": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "bytes": 1025,
+        "beacon_ok": false,
+        "ok": false
       }
     ]
   },
@@ -965,7 +1089,7 @@
         "stop": "19:00"
       },
       "pwr": {
-        "idle_nap_min": 90,
+        "idle_nap_min": 0,
         "nap_wake_min": 15,
         "batt_low_mv": 3450,
         "batt_off_mv": 3300,
@@ -983,8 +1107,7 @@
         "use_wifi": true,
         "near_hold_s": 30,
         "away_grace_s": 60,
-        "tele_min": 30,
-        "wifi": []
+        "tele_min": 30
       },
       "fw": {
         "ver": "",
@@ -1020,7 +1143,7 @@
             "stop": "19:00"
           },
           "pwr": {
-            "idle_nap_min": 90,
+            "idle_nap_min": 0,
             "nap_wake_min": 15,
             "batt_low_mv": 3450,
             "batt_off_mv": 3300,
@@ -1038,8 +1161,7 @@
             "use_wifi": true,
             "near_hold_s": 30,
             "away_grace_s": 60,
-            "tele_min": 30,
-            "wifi": []
+            "tele_min": 30
           },
           "fw": {
             "ver": "",
@@ -1051,7 +1173,7 @@
       },
       {
         "name": "plan_example",
-        "json": "{\"cv\":1,\"n\":12,\"did\":\"HB-3FA2C1\",\"srv\":{\"hosts\":[\"203.0.113.10\"],\"mqtt\":[8883],\"api\":8443},\"name\":\"Desk\",\"led\":{\"bright\":60},\"sched\":{\"on\":true,\"tz\":330,\"days\":\"1111100\",\"start\":\"09:00\",\"stop\":\"19:00\"},\"pwr\":{\"idle_nap_min\":90,\"nap_wake_min\":15,\"batt_low_mv\":3450,\"batt_off_mv\":3300,\"batt_cal_ppm\":0},\"ble\":{\"adv_fast_ms\":100,\"adv_fast_s\":30,\"adv_slow_ms\":500,\"conn_ms\":500,\"latency\":3,\"sup_ms\":6000},\"net\":{\"use_wifi\":true,\"near_hold_s\":30,\"away_grace_s\":60,\"tele_min\":30,\"wifi\":[]},\"fw\":{\"ver\":\"2.0.0\",\"path\":\"/fw/hb-2.0.0.bin\",\"sha256\":\"\",\"min_mv\":3700}}",
+        "json": "{\"cv\":1,\"n\":12,\"did\":\"HB-3FA2C1\",\"srv\":{\"hosts\":[\"203.0.113.10\"],\"mqtt\":[8883],\"api\":8443},\"name\":\"Desk\",\"led\":{\"bright\":60},\"sched\":{\"on\":true,\"tz\":330,\"days\":\"1111100\",\"start\":\"09:00\",\"stop\":\"19:00\"},\"pwr\":{\"idle_nap_min\":90,\"nap_wake_min\":15,\"batt_low_mv\":3450,\"batt_off_mv\":3300,\"batt_cal_ppm\":0},\"ble\":{\"adv_fast_ms\":100,\"adv_fast_s\":30,\"adv_slow_ms\":500,\"conn_ms\":500,\"latency\":3,\"sup_ms\":6000},\"net\":{\"use_wifi\":true,\"near_hold_s\":30,\"away_grace_s\":60,\"tele_min\":30},\"fw\":{\"ver\":\"2.0.0\",\"path\":\"/fw/hb-2.0.0.bin\",\"sha256\":\"\",\"min_mv\":3700}}",
         "cfg": {
           "cv": 1,
           "n": 12,
@@ -1095,8 +1217,7 @@
             "use_wifi": true,
             "near_hold_s": 30,
             "away_grace_s": 60,
-            "tele_min": 30,
-            "wifi": []
+            "tele_min": 30
           },
           "fw": {
             "ver": "2.0.0",
@@ -1107,7 +1228,7 @@
         }
       },
       {
-        "name": "partial_blocks_merge_defaults",
+        "name": "partial_blocks_merge_defaults_net_wifi_dropped",
         "json": "{\"cv\":1,\"n\":2,\"did\":\"HB-000001\",\"led\":{},\"sched\":{\"on\":true,\"tz\":330},\"net\":{\"wifi\":[{\"ssid\":\"Office\",\"psk\":\"longenough\"},{\"ssid\":\"Open\"}]}}",
         "cfg": {
           "cv": 1,
@@ -1132,7 +1253,7 @@
             "stop": "19:00"
           },
           "pwr": {
-            "idle_nap_min": 90,
+            "idle_nap_min": 0,
             "nap_wake_min": 15,
             "batt_low_mv": 3450,
             "batt_off_mv": 3300,
@@ -1150,17 +1271,7 @@
             "use_wifi": true,
             "near_hold_s": 30,
             "away_grace_s": 60,
-            "tele_min": 30,
-            "wifi": [
-              {
-                "ssid": "Office",
-                "psk": "longenough"
-              },
-              {
-                "ssid": "Open",
-                "psk": ""
-              }
-            ]
+            "tele_min": 30
           },
           "fw": {
             "ver": "",
@@ -1196,7 +1307,7 @@
             "stop": "19:00"
           },
           "pwr": {
-            "idle_nap_min": 90,
+            "idle_nap_min": 0,
             "nap_wake_min": 15,
             "batt_low_mv": 3450,
             "batt_off_mv": 3300,
@@ -1214,13 +1325,115 @@
             "use_wifi": true,
             "near_hold_s": 30,
             "away_grace_s": 60,
-            "tele_min": 30,
-            "wifi": [
-              {
-                "ssid": "A",
-                "psk": ""
-              }
-            ]
+            "tele_min": 30
+          },
+          "fw": {
+            "ver": "",
+            "path": "",
+            "sha256": "",
+            "min_mv": 3700
+          }
+        }
+      },
+      {
+        "name": "sched_past_midnight_accepted",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"sched\":{\"on\":true,\"start\":\"22:00\",\"stop\":\"06:00\"}}",
+        "cfg": {
+          "cv": 1,
+          "n": 1,
+          "did": "HB-3FA2C1",
+          "srv": {
+            "hosts": [],
+            "mqtt": [
+              8883
+            ],
+            "api": 8443
+          },
+          "name": "",
+          "led": {
+            "bright": 60
+          },
+          "sched": {
+            "on": true,
+            "tz": 0,
+            "days": "1111100",
+            "start": "22:00",
+            "stop": "06:00"
+          },
+          "pwr": {
+            "idle_nap_min": 0,
+            "nap_wake_min": 15,
+            "batt_low_mv": 3450,
+            "batt_off_mv": 3300,
+            "batt_cal_ppm": 0
+          },
+          "ble": {
+            "adv_fast_ms": 100,
+            "adv_fast_s": 30,
+            "adv_slow_ms": 500,
+            "conn_ms": 500,
+            "latency": 3,
+            "sup_ms": 6000
+          },
+          "net": {
+            "use_wifi": true,
+            "near_hold_s": 30,
+            "away_grace_s": 60,
+            "tele_min": 30
+          },
+          "fw": {
+            "ver": "",
+            "path": "",
+            "sha256": "",
+            "min_mv": 3700
+          }
+        }
+      },
+      {
+        "name": "sched_24h_accepted",
+        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"sched\":{\"on\":true,\"start\":\"09:00\",\"stop\":\"09:00\"}}",
+        "cfg": {
+          "cv": 1,
+          "n": 1,
+          "did": "HB-3FA2C1",
+          "srv": {
+            "hosts": [],
+            "mqtt": [
+              8883
+            ],
+            "api": 8443
+          },
+          "name": "",
+          "led": {
+            "bright": 60
+          },
+          "sched": {
+            "on": true,
+            "tz": 0,
+            "days": "1111100",
+            "start": "09:00",
+            "stop": "09:00"
+          },
+          "pwr": {
+            "idle_nap_min": 0,
+            "nap_wake_min": 15,
+            "batt_low_mv": 3450,
+            "batt_off_mv": 3300,
+            "batt_cal_ppm": 0
+          },
+          "ble": {
+            "adv_fast_ms": 100,
+            "adv_fast_s": 30,
+            "adv_slow_ms": 500,
+            "conn_ms": 500,
+            "latency": 3,
+            "sup_ms": 6000
+          },
+          "net": {
+            "use_wifi": true,
+            "near_hold_s": 30,
+            "away_grace_s": 60,
+            "tele_min": 30
           },
           "fw": {
             "ver": "",
@@ -1256,7 +1469,7 @@
             "stop": "19:00"
           },
           "pwr": {
-            "idle_nap_min": 90,
+            "idle_nap_min": 0,
             "nap_wake_min": 15,
             "batt_low_mv": 3450,
             "batt_off_mv": 3300,
@@ -1274,8 +1487,7 @@
             "use_wifi": true,
             "near_hold_s": 30,
             "away_grace_s": 60,
-            "tele_min": 30,
-            "wifi": []
+            "tele_min": 30
           },
           "fw": {
             "ver": "",
@@ -1311,7 +1523,7 @@
             "stop": "19:00"
           },
           "pwr": {
-            "idle_nap_min": 90,
+            "idle_nap_min": 0,
             "nap_wake_min": 15,
             "batt_low_mv": 3450,
             "batt_off_mv": 3300,
@@ -1329,8 +1541,7 @@
             "use_wifi": true,
             "near_hold_s": 30,
             "away_grace_s": 60,
-            "tele_min": 30,
-            "wifi": []
+            "tele_min": 30
           },
           "fw": {
             "ver": "",
@@ -1471,21 +1682,6 @@
         "err": "ble.sup_ms"
       },
       {
-        "name": "wifi_5_networks",
-        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"net\":{\"wifi\":[{\"ssid\":\"n0\"},{\"ssid\":\"n1\"},{\"ssid\":\"n2\"},{\"ssid\":\"n3\"},{\"ssid\":\"n4\"}]}}",
-        "err": "net.wifi"
-      },
-      {
-        "name": "wifi_psk_7_chars",
-        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"net\":{\"wifi\":[{\"ssid\":\"a\",\"psk\":\"1234567\"}]}}",
-        "err": "net.wifi"
-      },
-      {
-        "name": "wifi_ssid_missing",
-        "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"net\":{\"wifi\":[{\"psk\":\"12345678\"}]}}",
-        "err": "net.wifi"
-      },
-      {
         "name": "tele_min_zero",
         "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"net\":{\"tele_min\":0}}",
         "err": "net.tele_min"
@@ -1495,6 +1691,289 @@
         "json": "{\"cv\":1,\"n\":1,\"did\":\"HB-3FA2C1\",\"fw\":{\"sha256\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}}",
         "err": "fw.sha256"
       }
-    ]
+    ],
+    "sched": [
+      {
+        "name": "office_before_start",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "1111110",
+          "start": "09:00",
+          "stop": "19:00"
+        },
+        "epoch": 1795404599,
+        "in_hours": false,
+        "next_start_s": 1
+      },
+      {
+        "name": "office_at_start",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "1111110",
+          "start": "09:00",
+          "stop": "19:00"
+        },
+        "epoch": 1795404600,
+        "in_hours": true,
+        "next_start_s": 86400
+      },
+      {
+        "name": "office_last_second",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "1111110",
+          "start": "09:00",
+          "stop": "19:00"
+        },
+        "epoch": 1795872599,
+        "in_hours": true,
+        "next_start_s": 136801
+      },
+      {
+        "name": "office_at_stop_saturday",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "1111110",
+          "start": "09:00",
+          "stop": "19:00"
+        },
+        "epoch": 1795872600,
+        "in_hours": false,
+        "next_start_s": 136800
+      },
+      {
+        "name": "office_sunday_off",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "1111110",
+          "start": "09:00",
+          "stop": "19:00"
+        },
+        "epoch": 1795933800,
+        "in_hours": false,
+        "next_start_s": 75600
+      },
+      {
+        "name": "past_midnight_before_start",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "0000100",
+          "start": "22:00",
+          "stop": "06:00"
+        },
+        "epoch": 1795796940,
+        "in_hours": false,
+        "next_start_s": 60
+      },
+      {
+        "name": "past_midnight_at_start",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "0000100",
+          "start": "22:00",
+          "stop": "06:00"
+        },
+        "epoch": 1795797000,
+        "in_hours": true,
+        "next_start_s": 604800
+      },
+      {
+        "name": "past_midnight_next_morning_belongs_to_start_day",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "0000100",
+          "start": "22:00",
+          "stop": "06:00"
+        },
+        "epoch": 1795825740,
+        "in_hours": true,
+        "next_start_s": 576060
+      },
+      {
+        "name": "past_midnight_at_stop",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "0000100",
+          "start": "22:00",
+          "stop": "06:00"
+        },
+        "epoch": 1795825800,
+        "in_hours": false,
+        "next_start_s": 576000
+      },
+      {
+        "name": "past_midnight_stop_day_not_a_start_day",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "0000100",
+          "start": "22:00",
+          "stop": "06:00"
+        },
+        "epoch": 1795735800,
+        "in_hours": false,
+        "next_start_s": 61200
+      },
+      {
+        "name": "past_midnight_wraps_the_week",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "0000001",
+          "start": "22:00",
+          "stop": "06:00"
+        },
+        "epoch": 1795995000,
+        "in_hours": true,
+        "next_start_s": 579600
+      },
+      {
+        "name": "equal_is_24h_from_start",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "0000001",
+          "start": "09:00",
+          "stop": "09:00"
+        },
+        "epoch": 1796009340,
+        "in_hours": true,
+        "next_start_s": 518460
+      },
+      {
+        "name": "equal_ends_at_start_next_day",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "0000001",
+          "start": "09:00",
+          "stop": "09:00"
+        },
+        "epoch": 1796009400,
+        "in_hours": false,
+        "next_start_s": 518400
+      },
+      {
+        "name": "equal_before_start",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "0000001",
+          "start": "09:00",
+          "stop": "09:00"
+        },
+        "epoch": 1795922940,
+        "in_hours": false,
+        "next_start_s": 60
+      },
+      {
+        "name": "sched_tz_governs_utc0",
+        "sched": {
+          "on": true,
+          "tz": 0,
+          "days": "1111110",
+          "start": "09:00",
+          "stop": "19:00"
+        },
+        "epoch": 1795405500,
+        "in_hours": false,
+        "next_start_s": 18900
+      },
+      {
+        "name": "sched_tz_governs_ist",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "1111110",
+          "start": "09:00",
+          "stop": "19:00"
+        },
+        "epoch": 1795405500,
+        "in_hours": true,
+        "next_start_s": 85500
+      },
+      {
+        "name": "negative_tz",
+        "sched": {
+          "on": true,
+          "tz": -300,
+          "days": "1000000",
+          "start": "09:00",
+          "stop": "19:00"
+        },
+        "epoch": 1795442400,
+        "in_hours": true,
+        "next_start_s": 604800
+      },
+      {
+        "name": "no_days_never_in_hours",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "0000000",
+          "start": "09:00",
+          "stop": "19:00"
+        },
+        "epoch": 1795415400,
+        "in_hours": false,
+        "next_start_s": 0
+      },
+      {
+        "name": "sched_off_always_in_hours",
+        "sched": {
+          "on": false,
+          "tz": 330,
+          "days": "1111110",
+          "start": "09:00",
+          "stop": "19:00"
+        },
+        "epoch": 1795933800,
+        "in_hours": true
+      },
+      {
+        "name": "clock_unknown_is_in_hours",
+        "sched": {
+          "on": true,
+          "tz": 330,
+          "days": "1111110",
+          "start": "09:00",
+          "stop": "19:00"
+        },
+        "epoch": 0,
+        "in_hours": true
+      }
+    ],
+    "signature": {
+      "pub_spki_hex": "3059301306072a8648ce3d020106082a8648ce3d03010703420004255385fb5920ef546633a8aacc5491f0816982bd63cd9b00a1c8cbf99a2be34f121747252f6e9e9d004c174006e303082b52d6100fbb8e68c9b9d3f575149eea",
+      "verify": [
+        {
+          "name": "good",
+          "b": "eyJjdiI6MSwibiI6MSwiZGlkIjoiSEItM0ZBMkMxIn0",
+          "s": "MEYCIQCgoyurGmf93CRn_5SqsqbdMh5FlGYmJa_nv--Kiru3jgIhAM54KZghVlknAT7yq3vex5ZOFz4wmQDRTHNg3xf-lPcA",
+          "ok": true
+        },
+        {
+          "name": "other_bytes",
+          "b": "eyJjdiI6MSwibiI6MiwiZGlkIjoiSEItM0ZBMkMxIn0",
+          "s": "MEYCIQCgoyurGmf93CRn_5SqsqbdMh5FlGYmJa_nv--Kiru3jgIhAM54KZghVlknAT7yq3vex5ZOFz4wmQDRTHNg3xf-lPcA",
+          "ok": false
+        },
+        {
+          "name": "raw_r_s_is_not_der",
+          "b": "eyJjdiI6MSwibiI6MSwiZGlkIjoiSEItM0ZBMkMxIn0",
+          "s": "oKMrqxpn_dwkZ_-UqrKm3TIeRZRmJiWv57_vioq7t47OeCmYIVZZJwE-8qt73seWThc-MJkA0UxzYN8X_pT3AA",
+          "ok": false
+        }
+      ]
+    }
   }
 }
