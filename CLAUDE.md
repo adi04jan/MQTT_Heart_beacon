@@ -223,7 +223,8 @@ cron, pump rules); leave the shared `mosquitto`, `telegram_heart` and `mqtt-payl
 Forwarding (repo version, 2026-11-24): non-admin users get "❤️ Miss you" only for real hearts (`MQTT_MSG_1`); the
 admin gets every device message except routine `BATT_STATUS` (>= 3.5 V). `mosquitto_sub -R` skips the stale
 retained message, which `telegram_heart-restart.timer` (daily at 00:00) otherwise replayed to Telegram every night.
-The deployed copy on the server holds the
+Deployed on the server 2026-11-24 (backup `/usr/local/bin/mqtt_to_telegram.sh.bak-2026-11-24`). The deployed copy on the
+server holds the
 real token and IDs, so apply repo changes to it as a patch, never by overwriting the file. Known defects (bridge
 is retired in v2): any Telegram user can send commands; if the broker restarts, `mosquitto_sub` exits but the
 service stays active, so run `systemctl restart telegram_heart` after a broker restart.

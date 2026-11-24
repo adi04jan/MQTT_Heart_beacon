@@ -46,7 +46,8 @@ Tick a box only after its bench check passed.
 - [x] Commit branch (`feature/v1.2-wifi-power-queue`, local) - [ ] push + PR
 - [ ] 0.1.2 office-hours schedule (Mon-Sat 09:00-19:00 IST): host tests pass; bench test blocked until COM6 is back on USB
 - [ ] Release to other beacons by OTA: `firmware_0.1.1.bin` + `version.txt`
-- [ ] Optional bridge fixes while Telegram lives: sender allow-list, forward only `Miss you` to non-admins
+- [x] Bridge quieter (2026-11-24, deployed): non-admins get only real hearts, admin skips routine `BATT_STATUS`, `-R` drops the
+  stale retained message the daily restart replayed at midnight. Still open: sender allow-list
 
 ## B. v2 decisions (answered 2026-11-23, see plan "Answers from the user")
 - [x] 1. Fleet: 2 beacons, both owners on Android
@@ -102,6 +103,9 @@ Tick a box only after its bench check passed.
 - [~] Foreground service (`connectedDevice`), CDM presence, autoConnect GATT, MQTT, boot restart: written, compiles, not run on hardware
 - [x] Real data layer: `HttpApi` (pinned CA, IP-SAN check, 401/403/409/429 messages), Keystore-sealed creds, `RealRepo` + MQTT retry; error-state screens (41 core + 29 app tests, lead-verified 2026-11-24)
 - [ ] Drop the real `ca.crt` into `app/src/main/assets/hb_ca.pem` and the IP into `DEFAULT_HOST` after deploy; first on-phone run (Paho TLS on Android, bonding)
+- [x] Home = the beacon twin (2026-11-24, 802c694): 3D brass cage from the real build's photos, firmware LED effects byte-exact
+  (`fx` vectors shared by C and Kotlin), tap/double/triple/hold gestures like the button, dashboard over the left lobe,
+  settings below. Design polish pass in progress (impeccable)
 - [x] Nav-bar fix: scrolling lists end at the navigation bar (Home, Device settings, App settings; doubled inset dropped on Add device); emulator before/after, 3-button nav, 2026-11-24
 - [x] Protocol round 2 (2026-11-24): phone `resp` ack for relayed uplinks, 896 B beacon cap, `net.wifi` out of cfg, lowercase state names, schedule past midnight, `mood.from` = display name, signature format, Mosquitto 1.6.9 ACL text, NAP off by default, `link` to router `{did, ble}`, state/tele to the phone, duplicate `show` -> `shown`. Spec + vectors, C / Python / Kotlin tests green (`./test.sh`); beacon outbox is logic only until M3/M4 radios
 - [ ] Bench: reconnect p95 < 10 s; force-stop + phone reboot recovery; overnight Doze delay log
