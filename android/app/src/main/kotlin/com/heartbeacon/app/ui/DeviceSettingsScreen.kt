@@ -70,7 +70,7 @@ fun DeviceSettingsScreen(vm: DeviceSettingsVm, onBack: () -> Unit, onRemoved: ()
     fun hhmm(t: String) = fmt.clock(LocalTime.parse(t))
 
     Scaffold(topBar = { BackBar(cur.name, onBack) }) { pad ->
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + Space.xxl)) {
+        LazyColumn(Modifier.fillMaxSize().padding(bottom = pad.calculateBottomPadding()), contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = Space.xxl)) {
             item {
                 ItemRow("Name", cur.name, onClick = { dialog = Dialog.NAME })
             }

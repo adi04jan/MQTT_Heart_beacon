@@ -86,9 +86,9 @@ fun HomeScreen(vm: HomeVm, onBeacon: () -> Unit, onAdd: () -> Unit, onSettings: 
                 start = Space.screen,
                 end = Space.screen,
                 top = pad.calculateTopPadding() + Space.s,
-                bottom = pad.calculateBottomPadding() + Space.xxl,
+                bottom = Space.xxl,
             ),
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().padding(bottom = pad.calculateBottomPadding()),
         ) {
             item { beacon?.let { BeaconCard(it, fmt, now, onBeacon) } ?: NoBeacon(onAdd) }
             if (server != ServerLink.CONNECTED) item { ServerNote(server) }

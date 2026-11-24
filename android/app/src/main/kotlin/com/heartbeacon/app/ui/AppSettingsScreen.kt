@@ -77,7 +77,7 @@ fun AppSettingsScreen(vm: AppSettingsVm, onBack: () -> Unit) {
     }
 
     Scaffold(topBar = { BackBar("Settings", onBack) }) { pad ->
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + Space.xxl)) {
+        LazyColumn(Modifier.fillMaxSize().padding(bottom = pad.calculateBottomPadding()), contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = Space.xxl)) {
             item { SectionTitle("Notifications") }
             for (m in Mood.entries) {
                 item(key = m.wire) {
