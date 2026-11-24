@@ -31,7 +31,7 @@ flowchart LR
     A[Android app<br/>connectedDevice FGS]
   end
   subgraph VPS[VPS, one public IP]
-    M[Mosquitto<br/>8883 TLS, dynsec ACLs]
+    M[Mosquitto 1.6.9<br/>8883 TLS, pattern ACL]
     R[Router + API<br/>FastAPI, SQLite]
     P[Admin panel<br/>127.0.0.1 only]
   end
@@ -72,9 +72,9 @@ stateDiagram-v2
 | 2 | Transport selection | Phone is the gateway whenever a bonded encrypted link is up and the phone reports its server link up; otherwise device WiFi. The **router** tracks each beacon's current path and is the only queue. | Server holds delivery state (about 100 lines) instead of leaning on broker sessions, because a broker session cannot see BLE-path deliveries. |
 | 3 | BLE contract | One service, two characteristics (RX write, TX notify), same JSON envelope as MQTT with 1-byte fragmentation header. LE Secure Connections, Just Works, new bonds only inside a button-opened 2 min window. | JSON costs bytes over a compact binary format; in exchange the phone relays payloads verbatim. |
 | 4 | Android background | One always-on `connectedDevice` foreground service holding an `autoConnect=true` GATT and the MQTT socket; CompanionDeviceManager association + presence to resurrect it; battery-optimisation exemption. minSdk 34, target 36. | Permanent notification; Android 13 and older excluded. |
-| 5 | Security | Private CA (offline root) pinned in firmware + app; per-device and per-user username/password over server-auth TLS; one Mosquitto dynsec role per client; ECDSA-P256 signed config; RSA-3072 signed OTA with rollback. Secure boot and flash encryption **off**. | You own CA rotation; device secrets are readable by someone with the board and a USB cable. |
+| 5 | Security | Private CA (offline root) pinned in firmware + app; per-device and per-user username/password over server-auth TLS; Mosquitto `password_file` + `pattern` ACL per login (PROTOCOL.md 5.1); ECDSA-P256 signed config; RSA-3072 signed OTA with rollback. Secure boot and flash encryption **off**. | You own CA rotation; device secrets are readable by someone with the board and a USB cable. |
 | 6 | MQTT | Prefix `hb/v1`, per-device and per-user topic subtrees, QoS 1 for everything, retained state + retained signed config, LWT on state. Persistent session for phones only; beacons use clean start and the router flushes pending deliveries when they report online. | Queue depth and expiry live in the router's DB, not in broker config. |
-| 7 | Config server | FastAPI + stdlib `sqlite3` (WAL) + Jinja2 admin pages, Mosquitto 2.x with Dynamic Security plugin, two systemd units, no reverse proxy. Admin bound to 127.0.0.1, reached by SSH tunnel. | No admin from a phone browser; SQLite means one box. |
+| 7 | Config server | FastAPI + stdlib `sqlite3` (WAL) + Jinja2 admin pages, a separate Mosquitto 1.6.9 instance (`password_file` + `pattern` ACL), two systemd units, no reverse proxy. Admin bound to 127.0.0.1, reached by SSH tunnel. | No admin from a phone browser; SQLite means one box. |
 | 8 | Office hours | Schedule in config (days, on, off, tz offset). Time comes from the phone on every BLE connect or a `time` message from the router on MQTT connect. No SNTP. Unknown clock = treat as in-hours. | Deep-sleep wake times drift by minutes on the internal RC clock (est.); resynced on every wake. |
 | 9 | Migration | v1 units pull a v2 image through v1's own OTA. v2 keeps the stock 4 MB layout (1.25 MB slots) and fails the build above 1.18 MB. After OTA the unit boots unclaimed and its owner adds it in the app. | One last unsigned plain-HTTP OTA; a tight size budget for the life of rev A. |
 | 10 | Hardware | Carrier rev B: high-side load switch on the LED rail driven by GPIO10, default off. Everything else optional. Firmware runs on rev A unchanged. | A respin or a hand bodge per unit. |
@@ -148,7 +148,7 @@ Rules: receivers ignore unknown keys; unknown `t` with an `id` gets `resp ok:fal
 | `get` / `resp` | either -> beacon / beacon -> | `what`; `re`, `ok`, `err`, `d` | `get info` returns `did`, `fw`, `hw`, `pv`, `claimed` |
 | `claim` | phone -> beacon, BLE only | `host`, `mport`, `aport`, `user`, `pass` | accepted once; refused until factory reset (guard copied from `firmware/components/provisioning/config_store.c` `config_merge`) |
 | `wifi.scan` / `wifi.list` / `wifi.set` / `wifi.forget` / `wifi.use` | phone -> beacon, BLE only | `ssid`, `psk`, `on` | max 4 networks; `wifi.set` replies with join result and reason; PSKs never read back |
-| `link` | phone -> beacon; phone -> router | `up` (phone has server link); `did`, `ble` | drives handover |
+| `link` | phone -> beacon; phone -> router | to the beacon exactly `{up}`; to the router exactly `{did, ble}` | drives handover |
 | `relay` | phone <-> router | `did`, `m` (inner envelope) | wrapper for anything carried over BLE |
 | `reset` | phone -> beacon, BLE only | `what`: `wifi` \| `factory` | |
 
@@ -167,7 +167,7 @@ Rules: receivers ignore unknown keys; unknown `t` with an `id` gets `resp ok:fal
 
 ### MQTT topics
 
-Broker: Mosquitto 2.x, MQTT 5, TLS on 8883. Keepalive 240 s for beacons, 120 s for phones. Buffer on the beacon 2048 B.
+Broker: separate Mosquitto 1.6.9 instance, MQTT 5, TLS on 8883 (PROTOCOL.md 5.1). Keepalive 240 s for beacons, 120 s for phones. Buffer on the beacon 2048 B.
 
 | Topic | Publisher -> subscriber | QoS | Retain | Carries |
 |---|---|---|---|---|
@@ -179,11 +179,11 @@ Broker: Mosquitto 2.x, MQTT 5, TLS on 8883. Keepalive 240 s for beacons, 120 s f
 | `hb/v1/u/{uid}/state` | phone -> router, LWT `on:false` | 1 | yes | `{"on":true}` |
 | `hb/v1/u/{uid}/down` | router -> phone | 1 | no | `mood`, `rcpt`, `relay`, device status |
 
-| Client | Client id | Session | ACL (one dynsec role each, literal topics) |
+| Client | Client id | Session | ACL (`pattern` lines, `%u` = did or uid) |
 |---|---|---|---|
 | Beacon | `d-{did}` | clean start | publish `d/{did}/up`, `d/{did}/state`; subscribe `d/{did}/down`, `d/{did}/cfg` |
 | Phone | `u-{uid}-{install}` | persistent, expiry 24 h | publish `u/{uid}/up`, `u/{uid}/state`; subscribe `u/{uid}/down` |
-| Router | `router` | clean, 127.0.0.1:1883 only | `hb/v1/#` |
+| Router | `router` | clean, 127.0.0.1:1884 only | `hb/v1/#` |
 
 The shared topic, the self-echo and random client ids are gone. A press lights the presser's own beacon locally.
 
@@ -206,7 +206,7 @@ The pairing window closes the hole that `AI-Notes-recorder/docs/SECURITY-v1.md` 
 
 ### Config schema v1
 
-Signed by the server, published retained on `d/{did}/cfg`, also handed to the phone for BLE relay. Missing keys take compiled defaults. Raw size <= 1024 B.
+Signed by the server, published retained on `d/{did}/cfg`; the phone gets the signed `cfg` only from the API (claim, settings) and writes it to the beacon over BLE, never in a `relay`. Missing keys take compiled defaults. Raw size <= 1024 B.
 
 ```json
 {
@@ -215,9 +215,9 @@ Signed by the server, published retained on `d/{did}/cfg`, also handed to the ph
   "name": "Desk",
   "led": {"bright": 60},
   "sched": {"on": true, "tz": 330, "days": "1111100", "start": "09:00", "stop": "19:00"},
-  "pwr": {"idle_nap_min": 90, "nap_wake_min": 15, "batt_low_mv": 3450, "batt_off_mv": 3300, "batt_cal_ppm": 0},
+  "pwr": {"idle_nap_min": 0, "nap_wake_min": 15, "batt_low_mv": 3450, "batt_off_mv": 3300, "batt_cal_ppm": 0},
   "ble": {"adv_fast_ms": 100, "adv_fast_s": 30, "adv_slow_ms": 500, "conn_ms": 500, "latency": 3, "sup_ms": 6000},
-  "net": {"use_wifi": true, "near_hold_s": 30, "away_grace_s": 60, "tele_min": 30, "wifi": []},
+  "net": {"use_wifi": true, "near_hold_s": 30, "away_grace_s": 60, "tele_min": 30},
   "fw": {"ver": "2.0.0", "path": "/fw/hb-2.0.0.bin", "sha256": "", "min_mv": 3700}
 }
 ```
@@ -227,21 +227,20 @@ Signed by the server, published retained on `d/{did}/cfg`, also handed to the ph
 | `srv` | admin | `hosts` is a list so an IP move is a config push made before the move. |
 | `name`, `led`, `sched`, `pwr.idle_nap_min`, `net.use_wifi` | user in the app, admin | the app's whole settings surface |
 | `pwr` thresholds, `ble`, `net` timings | admin | tuning knobs for real hardware; `batt_cal_ppm` corrects the divider |
-| `net.wifi` | admin, optional | pre-provisions a network. Networks added in the app go to the beacon over BLE and are never uploaded. |
 | `fw` | admin | desired state. Beacon updates when `ver` differs, it is on WiFi, and battery >= `min_mv`. Never on boot. |
 
 ## Server
 
 | Piece | Choice |
 |---|---|
-| Layout | `server/hb_server/`: `api.py`, `admin.py`, `router.py` (pure `route(event, state) -> publishes` plus thin `aiomqtt` glue), `db.py`, `dynsec.py`, `signing.py`, `models.py` |
+| Layout | `server/hb_server/`: `api.py`, `admin.py`, `router.py` (pure `route(event, state) -> publishes` plus thin `aiomqtt` glue), `db.py`, `auth.py` (logins, broker `password_file`), `signing.py`, `models.py` |
 | Tables | `user` (name, argon2 hash, circle_id, disabled), `circle`, `device` (did, owner, registered, claimed, cfg_n, cfg_json, last state/tele), `event`, `delivery` (event, target, path, status), `fw_image` |
 | Pairing relationship | A user belongs to one circle. A `mood` from any member (beacon or app) goes to every other member's beacons and phones. |
 | Device registry | Admin registers a `did` at flash time; only registered, unclaimed `did`s can be claimed. A different user can claim only after the admin releases it. |
 | API (8443, TLS with the private-CA leaf, served by uvicorn directly) | `POST /api/v1/login`, `GET /api/v1/me`, `POST /api/v1/devices/claim`, `DELETE /api/v1/devices/{did}/claim`, `GET` and `PATCH /api/v1/devices/{did}/settings`, `GET /api/v1/events`, `GET /fw/{file}` (unauthenticated: images are signed and not secret) |
 | Keys | CA root: offline on the dev machine. OTA signing key: offline, used at build. Config signing key and TLS leaf key: on the VPS, mode 600. |
 | Deployment | apt `mosquitto`; `hb-api.service` (public 8443) and `hb-admin.service` (127.0.0.1:8444) from one uv project; ufw allows 22, 8883, 8443. Nothing on 80/443. |
-| Backups | Nightly `sqlite3 .backup` + dynsec JSON + config, tarred, encrypted with `age`, pushed off-box, 14 kept. Restore is rehearsed in M2. |
+| Backups | Nightly `sqlite3 .backup` + broker `password_file` + config, tarred, encrypted with `age`, pushed off-box, 14 kept. Restore is rehearsed in M2. |
 
 ### Claim flow
 
@@ -249,7 +248,7 @@ Signed by the server, published retained on `d/{did}/cfg`, also handed to the ph
 |---|---|---|
 | 1 | Beacon | Unclaimed or 5 s hold: pairing window, fast advertising. |
 | 2 | App | CDM `associate` filtered on the service UUID, connect, bond, `get info`. |
-| 3 | App -> server | `POST /devices/claim {did}`. Server creates the dynsec client and role, a 32-byte password, signed config n=1; returns them. |
+| 3 | App -> server | `POST /devices/claim {did}`. Only the admin-assigned user may claim (PROTOCOL.md 5.2). Server writes a 32-byte password into the broker `password_file`, signed config n=1; returns them. |
 | 4 | App -> beacon | `claim`, then `cfg`, `time`, optional `wifi.set` (reply says joined or why not). |
 | 5 | App | `startObservingDevicePresence`, start the service. |
 | Remove | App | server unclaim (credential deleted), `reset factory`, CDM `disassociate`, remove bond. |
@@ -342,7 +341,7 @@ One command for everything hardware-free: `./test.sh` (and `test.ps1`) runs firm
 | | |
 |---|---|
 | Goal | Broker, router, claim and config signing work with simulated beacons. |
-| Tasks | `deploy/mkca.sh`, `deploy/mosquitto.conf`, systemd units, `dynsec.py`, `db.py`, `router.py`, `signing.py`, `api.py`, minimal admin (devices list, config edit), `deploy/backup.sh` |
+| Tasks | `deploy/mkca.sh`, `deploy/mosquitto.conf`, systemd units, `auth.py`, `db.py`, `router.py`, `signing.py`, `api.py`, minimal admin (devices list, config edit), `deploy/backup.sh` |
 | Host tests | router: fan-out per circle, dedupe, path choice, retry on the other path, 24 h expiry, receipts; claim rules; config signature; ACL test against a local Mosquitto (a beacon cannot read another beacon's topics) |
 | Bench | From the dev PC over the public IP: TLS connect with the CA succeeds and fails without it; two `hb_sim` instances exchange a heart; restore a backup onto a scratch directory |
 | Exit | Above pass against the real VPS |
@@ -441,16 +440,18 @@ Exit: measured SLEEP current under 0.1 mA and the gated column of the power tabl
 - ESP32-C3 datasheet (deep-sleep current): https://documentation.espressif.com/esp32-c3_datasheet_en.html
 - Espressif low-power introduction (light-sleep current): https://docs.espressif.com/projects/esp-techpedia/en/latest/esp-friends/advanced-development/performance/lowpower/lowpower-fundamental.html
 
-Not verified by a source and marked for checking in the milestone named: `%u` substitution in dynsec ACLs (M2, plan avoids it), v1 WiFi credentials surviving in NVS (M8), Android 16 bond-loss handling (M5). Settled in M0: stock bootloader rollback (enabled, see Risks); ESP-IDF version (pinned to the installed v5.3.3).
+Not verified by a source and marked for checking in the milestone named: `%u` in `pattern` ACLs on 1.6.9 (M2: file semantics tested, real-broker test pending), v1 WiFi credentials surviving in NVS (M8), Android 16 bond-loss handling (M5). Settled in M0: stock bootloader rollback (enabled, see Risks); ESP-IDF version (pinned to the installed v5.3.3).
 
 ## Plan changes after the answers (2026-11-23)
 
 | Change | Why |
 |---|---|
-| **Broker: a separate Mosquitto instance for v2** on the home server (own config dir, own systemd unit, TLS 8883 + loopback 1883 for the router), not the shared broker. Uses the installed **Mosquitto 1.6.9**: no Dynamic Security plugin, so per-client auth is `password_file` (server-managed, reload via SIGHUP) + a static `acl_file` with `pattern` lines (`%u` = `did` for beacons, `uid` for phones). Router has `topic readwrite hb/v1/#`. Supersedes "dynsec" in Decisions 5 and 7, the topics table and the claim flow. | The shared broker (1.6.9) also serves the water-tank sensor, Frigate and the payload logger; v2 changes must not touch it. 1.6.9 supports MQTT 5 but not dynsec. |
+| **Broker: a separate Mosquitto instance for v2** on the home server (own config dir, own systemd unit, TLS 8883 + loopback 1884 for the router, 1883 being the shared broker's), not the shared broker. Uses the installed **Mosquitto 1.6.9**: no Dynamic Security plugin, so per-client auth is `password_file` (server-managed, reload via SIGHUP) + a static `acl_file` with `pattern` lines (`%u` = `did` for beacons, `uid` for phones). Router has `topic readwrite hb/v1/#`. Supersedes "dynsec" in Decisions 5 and 7, the topics table and the claim flow. | The shared broker (1.6.9) also serves the water-tank sensor, Frigate and the payload logger; v2 changes must not touch it. 1.6.9 supports MQTT 5 but not dynsec. |
 | **Office schedule seed** for both beacons: Mon-Sat 09:00-19:00, tz +330. | User's office hours. |
-| **NAP default** still open (lead recommends off by default on rev A: ~25 % saving for up to 15 min latency). Keep it a config value. | Awaiting user. |
+| **NAP off by default** (`pwr.idle_nap_min` 0); the user can turn it on per beacon. | User decision (2026-11-24). |
 | **Parallel tracks**: `feature/v2-fw` (M1 host logic + IDF skeleton build, radios off), `feature/v2-server` (M2 code, no deployment), `feature/v2-app` (M5 groundwork on fakes). `protocol/` is frozen during the round; contract changes are proposed, not edited. Merged into `feature/v2` by the lead. | Three independent codebases sharing one contract. |
+
+| **Protocol round 2** (2026-11-24): exact lowercase `state.st`; schedule windows past midnight belong to the start day, `start == stop` is 24 h, `sched.tz` governs; phone acks relayed beacon uplinks with `resp{re, ok:true}` after the broker PUBACK; beacon messages capped at 896 B; `link` to the router is `{did, ble}`; router forwards `state` / `tele` to the owner's phone; `mood.from` = display name; duplicate `show` answered with `shown`, not replayed; config signature format written down; `net.wifi` removed from the config. PROTOCOL.md section 9 lists them. | Clarifications proposed by the fw, server and app tracks in round 1. |
 
 ## Answers from the user (2026-11-23)
 

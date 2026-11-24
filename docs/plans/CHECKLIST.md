@@ -54,6 +54,7 @@ Tick a box only after its bench check passed.
 - [x] 3. Office WiFi: plain password, ports open
 - [x] 4. Hardware: no change for now (rev A, LED floor stays)
 - [x] 5. FCM: decide after M5 measurement
+- [x] NAP: off by default (`pwr.idle_nap_min` 0), user can enable per beacon (2026-11-24)
 - [x] 6. Circles: one circle, everyone receives
 - [x] 7. Missed hearts: play on wake, coalesced, 24 h
 - [x] 8. Server: existing home server via public IP (SSH-tunnel admin)
@@ -93,8 +94,9 @@ Tick a box only after its bench check passed.
 ### M5 Android app MVP
 - [x] `:core` relay/handover logic + codec tests (30 tests, 2026-11-23)
 - [~] Foreground service (`connectedDevice`), CDM presence, autoConnect GATT, MQTT, boot restart: written, compiles, not run on hardware
-- [~] Screens: all five on fakes (light + dark screenshots); real repo not wired; fix: bottom content sits under the nav bar (missing navigationBars insets)
-- [ ] Protocol round 2: apply the contract clarifications proposed by the fw/server/app tracks (phone `resp` ack for relayed uplinks, relay size cap, drop `net.wifi` from cfg, lowercase state names, schedule past midnight, `mood.from` = display name, signature format, Mosquitto 1.6.9 ACL text)
+- [~] Screens: all five on fakes (light + dark screenshots); real repo not wired
+- [x] Nav-bar fix: scrolling lists end at the navigation bar (Home, Device settings, App settings; doubled inset dropped on Add device); emulator before/after, 3-button nav, 2026-11-24
+- [x] Protocol round 2 (2026-11-24): phone `resp` ack for relayed uplinks, 896 B beacon cap, `net.wifi` out of cfg, lowercase state names, schedule past midnight, `mood.from` = display name, signature format, Mosquitto 1.6.9 ACL text, NAP off by default, `link` to router `{did, ble}`, state/tele to the phone, duplicate `show` -> `shown`. Spec + vectors, C / Python / Kotlin tests green (`./test.sh`); beacon outbox is logic only until M3/M4 radios
 - [ ] Bench: reconnect p95 < 10 s; force-stop + phone reboot recovery; overnight Doze delay log
 
 ### M6 schedule, smart power, settings, admin
