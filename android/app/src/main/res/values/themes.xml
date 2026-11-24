@@ -4,6 +4,6 @@
     <style name="Theme.HeartBeacon" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window</item>
     </style>
-    <color name="window">#FBF8F9</color>
-    <color name="accent">#9C2A4D</color>
+    <color name="window">#F0F0EE</color>
+    <color name="accent">#171614</color>
 </resources>

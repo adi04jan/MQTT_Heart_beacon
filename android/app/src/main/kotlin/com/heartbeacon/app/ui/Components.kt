@@ -2,14 +2,13 @@
 
 package com.heartbeacon.app.ui
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
+import android.app.Activity
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,42 +16,63 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import com.heartbeacon.app.R
 import com.heartbeacon.app.data.Mood
 import java.time.ZoneId
-import kotlin.math.cos
-import kotlin.math.sin
 
 @Composable
 fun rememberFormat(): Format {
     val locale = LocalContext.current.resources.configuration.locales[0]
     return androidx.compose.runtime.remember(locale) { Format(ZoneId.systemDefault(), locale) }
 }
+
+/** Status bar icons: dark over a light surface, light over the stage or a dark surface. */
+@Composable
+fun StatusBarIcons(dark: Boolean) {
+    val view = LocalView.current
+    SideEffect {
+        (view.context as? Activity)?.window?.let { WindowCompat.getInsetsController(it, view).isAppearanceLightStatusBars = dark }
+    }
+}
+
+/** For screens on the theme's own surface. */
+@Composable
+fun SurfaceStatusBar() = StatusBarIcons(MaterialTheme.colorScheme.surface.luminance() > 0.5f)
 
 @Composable
 fun BackBar(title: String, onBack: () -> Unit) {
@@ -65,15 +85,31 @@ fun BackBar(title: String, onBack: () -> Unit) {
     )
 }
 
+/** A section's heading: set in the dial face, in the text colour. The accent is kept for things you can press. */
 @Composable
 fun SectionTitle(text: String, modifier: Modifier = Modifier) {
     Text(
         text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = modifier.padding(start = Space.screen, end = Space.screen, top = Space.xl, bottom = Space.xs),
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = modifier
+            .padding(start = Space.screen + Space.s, end = Space.screen, top = Space.xl + Space.xs, bottom = Space.s)
+            .semantics { heading() },
     )
 }
+
+/** One section's rows on a single raised plate, hairlines between them (see [Line]). */
+@Composable
+fun Group(modifier: Modifier = Modifier, inset: Dp = Space.screen, content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.large,
+        modifier = modifier.padding(horizontal = inset).fillMaxWidth(),
+    ) { Column(content = content) }
+}
+
+@Composable
+fun Line() = HorizontalDivider(Modifier.padding(horizontal = Space.l), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
 
 private val rowColors @Composable get() = ListItemDefaults.colors(containerColor = Color.Transparent)
 
@@ -89,7 +125,7 @@ fun ItemRow(
         supportingContent = supporting?.let { { Text(it) } },
         trailingContent = trailing,
         colors = rowColors,
-        modifier = (if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(horizontal = Space.xs),
+        modifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
     )
 }
 
@@ -98,11 +134,16 @@ fun SwitchRow(title: String, supporting: String?, checked: Boolean, onChange: (B
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = supporting?.let { { Text(it) } },
-        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
+        trailingContent = {
+            val cs = MaterialTheme.colorScheme
+            Switch(
+                checked = checked,
+                onCheckedChange = null,
+                colors = SwitchDefaults.colors(checkedTrackColor = cs.brass, checkedThumbColor = cs.onBrass, checkedBorderColor = cs.brass),
+            )
+        },
         colors = rowColors,
-        modifier = Modifier
-            .toggleable(value = checked, role = Role.Switch, onValueChange = onChange)
-            .padding(horizontal = Space.xs),
+        modifier = Modifier.toggleable(value = checked, role = Role.Switch, onValueChange = onChange),
     )
 }
 
@@ -116,6 +157,23 @@ fun FactRow(title: String, value: String, onClick: (() -> Unit)? = null, attenti
             color = if (attention) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     })
+}
+
+/**
+ * A mood's mark for lists, in the button's own notation: one dot for a Heart, two for Sorry, three for Annoy, in
+ * that mood's LED colour, on a quiet disc.
+ */
+@Composable
+fun MoodDisc(mood: Mood, size: Dp = 36.dp) {
+    val cs = MaterialTheme.colorScheme
+    val c = moodColor(mood, onLight = cs.surface.luminance() > 0.5f)
+    Row(
+        Modifier.size(size).clip(CircleShape).background(cs.surfaceContainerHighest),
+        horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        repeat(mood.ordinal + 1) { Box(Modifier.size(6.dp).clip(CircleShape).background(c)) }
+    }
 }
 
 @Composable
@@ -145,35 +203,3 @@ fun ErrorNote(text: String, modifier: Modifier = Modifier) {
 @Composable
 fun VectorIcon(v: ImageVector, tint: Color, size: Dp = 18.dp) =
     Icon(v, contentDescription = null, tint = tint, modifier = Modifier.size(size))
-
-/**
- * The beacon itself: its nine pixels on a ring. Lit pixels use [color]; [pulse] breathes them the way
- * the hardware does in the pairing window.
- */
-@Composable
-fun LedRing(lit: Boolean, color: Color, size: Dp, modifier: Modifier = Modifier, pulse: Boolean = false, body: Boolean = false) {
-    val dim = MaterialTheme.colorScheme.outlineVariant
-    val face = MaterialTheme.colorScheme.surfaceContainerHigh
-    val alpha = if (pulse) {
-        rememberInfiniteTransition(label = "pulse").animateFloat(
-            initialValue = 0.35f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-            label = "alpha",
-        ).value
-    } else {
-        1f
-    }
-    Canvas(modifier.size(size)) {
-        val r = this.size.minDimension / 2
-        // Drawn as the device (a round face with its pixels inset) when large, so it never reads as a spinner.
-        if (body) drawCircle(face, r)
-        val dot = r * if (body) 0.085f else 0.17f
-        val ring = if (body) r * 0.68f else r - dot
-        repeat(9) { i ->
-            val a = Math.toRadians(-90.0 + i * 40.0)
-            val c = Offset(center.x + ring * cos(a).toFloat(), center.y + ring * sin(a).toFloat())
-            drawCircle(if (lit) color.copy(alpha = alpha) else dim, dot, c)
-        }
-    }
-}

@@ -46,4 +46,12 @@ class FormatTest {
         assertEquals("06:00 next day", f.sleeps(t("22:00"), t("06:00")))
         assertEquals("09:00 next day", f.sleeps(t("09:00"), t("09:00"))) // equal = 24 h on
     }
+
+    @Test fun awakeSpansFollowTheScheduleRule() {
+        val t = { h: Int -> java.time.LocalTime.of(h, 0) }
+        assertEquals(listOf(0.375f to 0.75f), awakeSpans(t(9), t(18)))
+        assertEquals(listOf(0f to 0.25f, 0.75f to 1f), awakeSpans(t(18), t(6))) // past midnight: two spans
+        assertEquals(listOf(0.5f to 1f), awakeSpans(t(12), t(0))) // stop at midnight leaves no empty span
+        assertEquals(listOf(0f to 1f), awakeSpans(t(9), t(9))) // equal = 24 h on
+    }
 }

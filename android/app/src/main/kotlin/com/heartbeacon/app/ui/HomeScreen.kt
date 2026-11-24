@@ -2,7 +2,6 @@
 
 package com.heartbeacon.app.ui
 
-import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -23,10 +22,11 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Done
@@ -39,7 +39,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,12 +47,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.heartbeacon.app.data.DeviceSettings
@@ -90,18 +89,12 @@ fun HomeScreen(vm: HomeVm, onAdd: () -> Unit, onSettings: () -> Unit) {
     val title = beacon?.name ?: "Heart Beacon"
 
     BoxWithConstraints(Modifier.fillMaxSize().background(cs.surface)) {
-        val stageHeight = maxHeight * 0.64f
+        val stageHeight = maxHeight * 0.66f
         val stagePx = with(LocalDensity.current) { stageHeight.toPx() }
         val pinned by remember { derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > stagePx * 0.82f } }
 
         // Light status icons over the dark stage; the theme's own once the pinned bar covers it.
-        val view = LocalView.current
-        val lightSurface = cs.surface.luminance() > 0.5f
-        SideEffect {
-            (view.context as? Activity)?.window?.let {
-                WindowCompat.getInsetsController(it, view).isAppearanceLightStatusBars = pinned && lightSurface
-            }
-        }
+        StatusBarIcons(dark = pinned && cs.surface.luminance() > 0.5f)
 
         LazyColumn(
             state = list,
@@ -133,11 +126,31 @@ fun HomeScreen(vm: HomeVm, onAdd: () -> Unit, onSettings: () -> Unit) {
                         "Nothing yet. Moods you send and receive show up here.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = cs.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = Space.screen, vertical = Space.s),
+                        modifier = Modifier.padding(horizontal = Space.screen + Space.s, vertical = Space.s),
                     )
                 }
             }
-            events.take(6).forEach { e -> item(key = e.id) { EventRow(e, fmt) } }
+            val recent = events.take(6)
+            if (recent.isNotEmpty()) {
+                item {
+                    Group {
+                        recent.forEachIndexed { i, e ->
+                            if (i > 0) Line()
+                            EventRow(e, fmt)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Once the stage starts to leave and until the bar pins, keep its ground under the status bar, so the
+        // dashboard scrolling up never runs into the clock.
+        val leaving by remember { derivedStateOf { !pinned && list.firstVisibleItemScrollOffset > stagePx * 0.12f } }
+        AnimatedVisibility(leaving, enter = fadeIn(tween(160)), exit = fadeOut(tween(120))) {
+            Column {
+                Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(Stage.ground))
+                Box(Modifier.fillMaxWidth().height(24.dp).background(Brush.verticalGradient(listOf(Stage.ground, Color.Transparent))))
+            }
         }
 
         AnimatedVisibility(pinned, enter = fadeIn(tween(160)), exit = fadeOut(tween(120))) {
@@ -155,11 +168,11 @@ fun HomeScreen(vm: HomeVm, onAdd: () -> Unit, onSettings: () -> Unit) {
 @Composable
 private fun StageBar(title: String, did: String?, onSettings: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().statusBarsPadding().padding(start = Space.screen, end = Space.xs, top = Space.s),
+        Modifier.fillMaxWidth().statusBarsPadding().padding(start = 20.dp, end = Space.xs, top = Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleLarge, color = Stage.text)
+            Text(title, style = MaterialTheme.typography.headlineMedium, color = Stage.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
             did?.let { Text(it, style = MaterialTheme.typography.labelMedium.merge(Tabular), color = Stage.label) }
         }
         IconButton(onClick = onSettings) { Icon(Icons.Outlined.Settings, contentDescription = "App settings", tint = Stage.text) }
@@ -170,13 +183,11 @@ private fun StageBar(title: String, did: String?, onSettings: () -> Unit) {
 private fun EventRow(e: Event, fmt: Format) {
     val cs = MaterialTheme.colorScheme
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = Space.screen, vertical = Space.s),
+        Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = Space.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(36.dp).clip(CircleShape).background(cs.surfaceContainerHigh), contentAlignment = Alignment.Center) {
-            MoodIcon(e.mood, if (e.mood == Mood.HEART) cs.primary else cs.onSurfaceVariant, size = 18.dp)
-        }
-        Spacer(Modifier.width(Space.m))
+        MoodDisc(e.mood)
+        Spacer(Modifier.width(Space.l))
         Column(Modifier.weight(1f)) {
             Text(fmt.event(e.mood, e.from), style = MaterialTheme.typography.bodyLarge)
             Text(

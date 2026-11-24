@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-24T16:45:00+05:30",
+  "title": "Design System: Heart Beacon",
+  "extensions": {
+    "colorMeta": {
+      "brass": { "role": "primary", "displayName": "Brass", "canonical": "#B98E2B", "tonalRamp": ["#261A00", "#3A2A00", "#55410F", "#765710", "#9A7628", "#C29A47", "#E2BC6A", "#F1DFB0"] },
+      "brass-bright": { "role": "primary", "displayName": "Bright Brass (on felt)", "canonical": "#E2BC6A", "tonalRamp": ["#261A00", "#3A2A00", "#55410F", "#765710", "#9A7628", "#C29A47", "#E2BC6A", "#FBE3AC"] },
+      "tin": { "role": "neutral", "displayName": "Tin", "canonical": "#F0F0EE", "tonalRamp": ["#1A1917", "#2F2E2B", "#55524B", "#7E7A71", "#D3D1CB", "#E1E0DC", "#F0F0EE", "#FAFAF8"] },
+      "felt": { "role": "neutral", "displayName": "Felt", "canonical": "#131211", "tonalRamp": ["#0C0B0A", "#131211", "#1A1917", "#1E1D1A", "#292724", "#34322E", "#3B3934", "#958F84"] },
+      "stage-ground": { "role": "neutral", "displayName": "Stage Cloth", "canonical": "#101112", "tonalRamp": ["#0A0A0B", "#101112", "#1A1B1C", "#26282A", "#3A3C3E", "#3C3934", "#A29B8F", "#F2EEE6"] },
+      "led-heart": { "role": "tertiary", "displayName": "Heart LED", "canonical": "#FA343C", "tonalRamp": ["#3A0005", "#6B000C", "#9C0E1A", "#C81E2B", "#FA343C", "#FF6F73", "#FFA9AB", "#FFDAD9"] },
+      "led-sorry": { "role": "tertiary", "displayName": "Sorry LED", "canonical": "#EBA117", "tonalRamp": ["#2A1A00", "#4A3000", "#6C4700", "#B85C00", "#B97D08", "#EBA117", "#F7C25E", "#FFE2AE"] },
+      "led-annoy": { "role": "tertiary", "displayName": "Annoy LED", "canonical": "#17E7EB", "tonalRamp": ["#002021", "#00373A", "#005457", "#00757A", "#00A3A8", "#17E7EB", "#7BF3F5", "#C6FBFC"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "App name on sign-in; the battery figure on the stage." },
+      "headline": { "displayName": "Headline", "purpose": "Beacon name on the stage; step headings." },
+      "title": { "displayName": "Title", "purpose": "Section headings, top bars, time values, stage readings." },
+      "body": { "displayName": "Body", "purpose": "Row titles, supporting text, explanations; system face." },
+      "label": { "displayName": "Label", "purpose": "Buttons and day letters, in Jost." }
+    },
+    "shadows": [],
+    "motion": [
+      { "name": "intro-turn", "value": "1500ms FastOutSlowIn", "purpose": "The cage turns into its resting three-quarter view once on entry." },
+      { "name": "tap-squash", "value": "70ms tween to 0.95, spring back (damping 0.38, stiffness 650)", "purpose": "The heart gives under a tap." },
+      { "name": "sent-wave", "value": "1300ms linear, cubic ease-out growth", "purpose": "A sent mood leaves as a heart-shaped wave in its colour." },
+      { "name": "settle", "value": "spring (damping 0.9, stiffness 40) 3.5 s after the last touch", "purpose": "The cage returns to rest after a drag." },
+      { "name": "led-effects", "value": "firmware timing: 1040 ms pulse, 100 ms gap, 3 pulses", "purpose": "LED frames come from Fx, byte-exact with the beacon." },
+      { "name": "screen-change", "value": "fade out 90ms, fade in 220ms after 90ms", "purpose": "Fade-through between screens and steps." }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "A screen's main action: Sign in, Continue, Find my beacon.",
+      "html": "<button class=\"ds-btn-primary\">Find my beacon</button>",
+      "css": ".ds-btn-primary { background: #B98E2B; color: #231700; height: 52px; padding: 0 32px; border: none; border-radius: 999px; font: 500 16px Jost, sans-serif; letter-spacing: 0.2px; transition: background 0.15s; } .ds-btn-primary:hover { background: #a67f24; } .ds-btn-primary:focus-visible { outline: 2px solid #1A1917; outline-offset: 2px; }"
+    },
+    {
+      "name": "Stage Button",
+      "kind": "button",
+      "refersTo": "button-primary-on-stage",
+      "description": "The primary action on the dark felt stage (Add beacon).",
+      "html": "<div class=\"ds-stage-wrap\"><button class=\"ds-btn-stage\">Add beacon</button></div>",
+      "css": ".ds-stage-wrap { background: #101112; padding: 24px; border-radius: 28px; } .ds-btn-stage { background: #E2BC6A; color: #2E2100; height: 48px; padding: 0 28px; border: none; border-radius: 999px; font: 500 16px Jost, sans-serif; letter-spacing: 0.2px; } .ds-btn-stage:hover { background: #ecc980; } .ds-btn-stage:focus-visible { outline: 2px solid #F2EEE6; outline-offset: 2px; }"
+    },
+    {
+      "name": "Plate",
+      "kind": "card",
+      "refersTo": "plate",
+      "description": "One settings section: rows on a tonal plate, hairlines between, heading above.",
+      "html": "<div class=\"ds-section\"><h3 class=\"ds-section-title\">Wi-Fi</h3><div class=\"ds-plate\"><div class=\"ds-row\"><div><div class=\"ds-row-title\">Office-5G</div><div class=\"ds-row-sub\">Saved on the beacon</div></div><button class=\"ds-text-btn\">Forget</button></div><div class=\"ds-line\"></div><div class=\"ds-row\"><div class=\"ds-row-title\">Add network</div><span class=\"ds-plus\">+</span></div></div></div>",
+      "css": ".ds-section { background: #F0F0EE; padding: 16px; font-family: Roboto, system-ui, sans-serif; } .ds-section-title { font: 500 19px/26px Jost, sans-serif; color: #1A1917; margin: 12px 8px 8px; } .ds-plate { background: #FAFAF8; border-radius: 22px; } .ds-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; min-height: 48px; } .ds-row-title { font-size: 16px; color: #1A1917; } .ds-row-sub { font-size: 14px; color: #55524B; } .ds-line { height: 1px; margin: 0 16px; background: rgba(211,209,203,0.7); } .ds-text-btn { background: none; border: none; color: #765710; font: 500 16px Jost, sans-serif; padding: 12px; border-radius: 999px; } .ds-text-btn:hover { background: rgba(118,87,16,0.08); } .ds-text-btn:focus-visible { outline: 2px solid #765710; } .ds-plus { color: #765710; font-size: 22px; }"
+    },
+    {
+      "name": "Day Toggles",
+      "kind": "chip",
+      "refersTo": "day-toggle-on",
+      "description": "Seven round toggles for the schedule's days; brass when on, a hairline ring when off.",
+      "html": "<div class=\"ds-days\"><button class=\"ds-day ds-day-on\">M</button><button class=\"ds-day ds-day-on\">T</button><button class=\"ds-day ds-day-on\">W</button><button class=\"ds-day\">S</button></div>",
+      "css": ".ds-days { display: flex; gap: 8px; background: #FAFAF8; padding: 12px; border-radius: 22px; } .ds-day { width: 40px; height: 40px; border-radius: 50%; border: 1px solid #D3D1CB; background: transparent; color: #55524B; font: 500 16px Jost, sans-serif; } .ds-day-on { background: #B98E2B; border-color: transparent; color: #231700; } .ds-day:focus-visible { outline: 2px solid #1A1917; outline-offset: 2px; }"
+    },
+    {
+      "name": "Stage Readout",
+      "kind": "custom",
+      "refersTo": "stage",
+      "description": "A dashboard reading over the cage: label, large figure, battery pips in the firmware's bar colours.",
+      "html": "<div class=\"ds-readout\"><div class=\"ds-readout-label\">Battery</div><div class=\"ds-readout-figure\">82<span>%</span></div><div class=\"ds-pips\"><i style=\"background:#ff0000\"></i><i style=\"background:#ff3f00\"></i><i style=\"background:#ff7f00\"></i><i style=\"background:#ffbf00\"></i><i style=\"background:#ffff00\"></i><i style=\"background:#ffff00\"></i><i style=\"background:#aaff00\"></i><i></i><i></i></div></div>",
+      "css": ".ds-readout { background: #1A1B1C; padding: 20px; border-radius: 28px; width: 164px; } .ds-readout-label { font: 500 12px Roboto, system-ui, sans-serif; color: #A29B8F; } .ds-readout-figure { font: 300 40px/44px Jost, sans-serif; color: #F2EEE6; font-variant-numeric: tabular-nums; } .ds-readout-figure span { font-size: 23px; font-weight: 400; color: #A29B8F; margin-left: 2px; } .ds-pips { display: flex; gap: 3px; margin-top: 4px; } .ds-pips i { width: 8px; height: 13px; border-radius: 2.5px; background: #3C3934; }"
+    },
+    {
+      "name": "Gesture Key",
+      "kind": "custom",
+      "refersTo": "stage",
+      "description": "The button's language, drawn: one, two, three taps and a hold.",
+      "html": "<div class=\"ds-key\"><span><i></i>Heart</span><span><i></i><i></i>Sorry</span><span><i></i><i></i><i></i>Annoy</span><span><b></b>Battery</span></div>",
+      "css": ".ds-key { display: flex; flex-wrap: wrap; gap: 6px 18px; background: #101112; padding: 16px 20px; border-radius: 28px; font: 12px Roboto, system-ui, sans-serif; color: #C2BBAF; } .ds-key span { display: inline-flex; align-items: center; } .ds-key i { width: 6px; height: 6px; border-radius: 50%; background: #A29B8F; margin-right: 3px; } .ds-key i:last-of-type { margin-right: 7px; } .ds-key b { width: 16px; height: 6px; border-radius: 3px; background: #A29B8F; margin-right: 7px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Made of what it's made of",
+    "overview": "The beacon is a heart of thin brass rods, joined by hand with blobs of tin solder, photographed on grey felt. The app uses those three materials and nothing else. Brass is the one accent: every control you can press, every selected state and the primary action. Tin, the solder's pale neutral grey, is the light ground. Felt, the charcoal cloth, is the dark ground and the stage the beacon stands on in both themes.\n\nThe object leads. Home opens on the beacon itself, drawn from the real build: rods, soft uneven joints, battery block, board, LEDs and wire. Everything else is quiet Material 3 on tin or felt, with section rows gathered on rounded plates. Saturated colour exists only where the firmware puts it, in the LEDs, so colour always means a mood or the battery.\n\nNothing moves at rest. The stage draws a frame only while an LED effect, a gesture or a transition runs.",
+    "keyCharacteristics": [
+      "One accent (brass), two grounds (tin, felt), firmware LED colours as the only saturated colour.",
+      "A fixed dark felt stage in both themes; the object and its light are the picture.",
+      "Jost for names, headings, figures and buttons; the system face for reading.",
+      "Sections on rounded plates with hairlines; no shadows.",
+      "The twin shows only what the desk beacon does. Unknown is shown as unknown."
+    ],
+    "rules": [
+      { "name": "The Firmware Colour Rule", "body": "A saturated colour on screen is a colour the LEDs can show, and it means that mood or the battery level. No other red, amber, cyan or blue appears, except Material's error role.", "section": "colors" },
+      { "name": "The Brass Is Pressable Rule", "body": "Brass marks controls and selections only. Headings and facts are ink.", "section": "colors" },
+      { "name": "The Tabular Rule", "body": "Battery, times, dBm, versions and step counts use tabular figures so values do not jitter.", "section": "typography" },
+      { "name": "The Light Is Real Rule", "body": "Glow appears only where an LED is lit, in that LED's colour. No decorative glows, no glass, no gradient text.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep brass for things that can be pressed or are selected.",
+      "Do take every LED colour and timing from `Fx`; show stale or missing values as stale or unknown.",
+      "Do keep the stage on dark felt in both themes, and draw frames only while something is happening.",
+      "Do group a section's rows on one plate with hairlines, heading above in Jost.",
+      "Do keep joints on the cage rounded and uneven, rods thin, highlights wide and soft."
+    ],
+    "donts": [
+      "Don't add a second accent or use an LED colour for decoration.",
+      "Don't play a sent mood on the user's own heart.",
+      "Don't add shadows under plates, glass panels, gradient text, emoji icons or small labels above headings.",
+      "Don't animate the stage at rest."
+    ]
+  }
+}

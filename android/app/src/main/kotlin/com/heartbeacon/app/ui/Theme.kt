@@ -1,55 +1,65 @@
 package com.heartbeacon.app.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.heartbeacon.app.R
+import com.heartbeacon.app.data.Mood
 
 /*
- * One accent (rose wine) on near-neutral grounds that carry a trace of the same hue, so the accent
- * belongs to the surface instead of sitting on top of it. Secondary and tertiary are deliberately the
- * neutrals: tonal buttons and chips stay quiet and only the primary action is coloured.
- * No dynamic colour: the single accent is the identity.
+ * The app is made of what the beacon is made of. Two metals and the cloth it sits on:
+ * brass is the one accent (controls, selection, the primary action), tin is the light ground (the solder),
+ * felt is the dark ground (the grey cloth in the photos). The only saturated colours anywhere are the
+ * firmware's LED colours, and they always mean a mood or the battery, never decoration.
+ * No dynamic colour: the materials are the identity.
  */
 private val Light = lightColorScheme(
-    primary = Color(0xFF9C2A4D),
+    primary = Color(0xFF765710),
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFFFD9E1),
-    onPrimaryContainer = Color(0xFF3F0018),
-    inversePrimary = Color(0xFFFFB1C4),
-    secondary = Color(0xFF6A5A60),
+    primaryContainer = Color(0xFFF1DFB0),
+    onPrimaryContainer = Color(0xFF261A00),
+    inversePrimary = Color(0xFFE2BC6A),
+    secondary = Color(0xFF5F5B52),
     onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFEDE4E8),
-    onSecondaryContainer = Color(0xFF241A1E),
-    tertiary = Color(0xFF6A5A60),
+    secondaryContainer = Color(0xFFE6E4DE),
+    onSecondaryContainer = Color(0xFF1D1B16),
+    tertiary = Color(0xFF5F5B52),
     onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFEDE4E8),
-    onTertiaryContainer = Color(0xFF241A1E),
-    background = Color(0xFFFBF8F9),
-    onBackground = Color(0xFF1D1A1C),
-    surface = Color(0xFFFBF8F9),
-    onSurface = Color(0xFF1D1A1C),
-    surfaceVariant = Color(0xFFEFE8EB),
-    onSurfaceVariant = Color(0xFF574F53),
-    surfaceTint = Color(0xFF9C2A4D),
-    inverseSurface = Color(0xFF322F31),
-    inverseOnSurface = Color(0xFFF5EFF2),
-    outline = Color(0xFF8A8186),
-    outlineVariant = Color(0xFFDAD2D6),
-    surfaceBright = Color(0xFFFBF8F9),
-    surfaceDim = Color(0xFFDCD8DA),
+    tertiaryContainer = Color(0xFFE6E4DE),
+    onTertiaryContainer = Color(0xFF1D1B16),
+    background = Color(0xFFF0F0EE),
+    onBackground = Color(0xFF1A1917),
+    surface = Color(0xFFF0F0EE),
+    onSurface = Color(0xFF1A1917),
+    surfaceVariant = Color(0xFFE3E2DE),
+    onSurfaceVariant = Color(0xFF55524B),
+    surfaceTint = Color(0xFF765710),
+    inverseSurface = Color(0xFF2F2E2B),
+    inverseOnSurface = Color(0xFFF2F0EB),
+    outline = Color(0xFF7E7A71),
+    outlineVariant = Color(0xFFD3D1CB),
+    surfaceBright = Color(0xFFFAFAF8),
+    surfaceDim = Color(0xFFD9D8D4),
     surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFF5F1F3),
-    surfaceContainer = Color(0xFFF0EBEE),
-    surfaceContainerHigh = Color(0xFFEAE5E8),
-    surfaceContainerHighest = Color(0xFFE4DFE2),
+    surfaceContainerLow = Color(0xFFF7F7F5),
+    surfaceContainer = Color(0xFFFAFAF8),
+    surfaceContainerHigh = Color(0xFFE8E7E3),
+    surfaceContainerHighest = Color(0xFFE1E0DC),
     error = Color(0xFFB3261E),
     onError = Color(0xFFFFFFFF),
     errorContainer = Color(0xFFF9DEDC),
@@ -57,53 +67,87 @@ private val Light = lightColorScheme(
 )
 
 private val Dark = darkColorScheme(
-    primary = Color(0xFFF0A8BB),
-    onPrimary = Color(0xFF55102D),
-    primaryContainer = Color(0xFF7C2943),
-    onPrimaryContainer = Color(0xFFFFD9E1),
-    inversePrimary = Color(0xFF9C2A4D),
-    secondary = Color(0xFFD6C8CD),
-    onSecondary = Color(0xFF3A2E33),
-    secondaryContainer = Color(0xFF3A3236),
-    onSecondaryContainer = Color(0xFFEDE4E8),
-    tertiary = Color(0xFFD6C8CD),
-    onTertiary = Color(0xFF3A2E33),
-    tertiaryContainer = Color(0xFF3A3236),
-    onTertiaryContainer = Color(0xFFEDE4E8),
-    background = Color(0xFF141214),
-    onBackground = Color(0xFFE8E1E4),
-    surface = Color(0xFF141214),
-    onSurface = Color(0xFFE8E1E4),
-    surfaceVariant = Color(0xFF4A4347),
-    onSurfaceVariant = Color(0xFFCFC5CA),
-    surfaceTint = Color(0xFFF0A8BB),
-    inverseSurface = Color(0xFFE8E1E4),
-    inverseOnSurface = Color(0xFF322F31),
-    outline = Color(0xFF988F94),
-    outlineVariant = Color(0xFF4A4347),
-    surfaceBright = Color(0xFF3B373A),
-    surfaceDim = Color(0xFF141214),
-    surfaceContainerLowest = Color(0xFF0F0D0F),
-    surfaceContainerLow = Color(0xFF1D1A1C),
-    surfaceContainer = Color(0xFF221E21),
-    surfaceContainerHigh = Color(0xFF2C292B),
-    surfaceContainerHighest = Color(0xFF373336),
+    primary = Color(0xFFE2BC6A),
+    onPrimary = Color(0xFF3A2A00),
+    primaryContainer = Color(0xFF55410F),
+    onPrimaryContainer = Color(0xFFFBE3AC),
+    inversePrimary = Color(0xFF765710),
+    secondary = Color(0xFFCBC6BA),
+    onSecondary = Color(0xFF322F28),
+    secondaryContainer = Color(0xFF36332D),
+    onSecondaryContainer = Color(0xFFE8E3D8),
+    tertiary = Color(0xFFCBC6BA),
+    onTertiary = Color(0xFF322F28),
+    tertiaryContainer = Color(0xFF36332D),
+    onTertiaryContainer = Color(0xFFE8E3D8),
+    background = Color(0xFF131211),
+    onBackground = Color(0xFFEAE5DC),
+    surface = Color(0xFF131211),
+    onSurface = Color(0xFFEAE5DC),
+    surfaceVariant = Color(0xFF45423C),
+    onSurfaceVariant = Color(0xFFC6C0B4),
+    surfaceTint = Color(0xFFE2BC6A),
+    inverseSurface = Color(0xFFEAE5DC),
+    inverseOnSurface = Color(0xFF2F2E2B),
+    outline = Color(0xFF958F84),
+    outlineVariant = Color(0xFF3B3934),
+    surfaceBright = Color(0xFF393733),
+    surfaceDim = Color(0xFF131211),
+    surfaceContainerLowest = Color(0xFF0D0C0B),
+    surfaceContainerLow = Color(0xFF1A1917),
+    surfaceContainer = Color(0xFF1E1D1A),
+    surfaceContainerHigh = Color(0xFF292724),
+    surfaceContainerHighest = Color(0xFF34322E),
     error = Color(0xFFF2B8B5),
     onError = Color(0xFF601410),
     errorContainer = Color(0xFF8C1D18),
     onErrorContainer = Color(0xFFF9DEDC),
 )
 
-// Material scale, system face. Titles a step heavier than stock so section structure reads at a glance.
+/**
+ * Jost (SIL OFL, bundled): the geometric lettering of instrument dials, for names, headings, big figures and
+ * buttons. Body copy, labels and fields stay on the system face.
+ */
+val Jost = FontFamily(
+    Font(R.font.jost, FontWeight.Light),
+    Font(R.font.jost, FontWeight.Normal),
+    Font(R.font.jost, FontWeight.Medium),
+)
+
 private val Type = Typography().run {
     copy(
-        headlineMedium = headlineMedium.copy(fontWeight = FontWeight.Medium, letterSpacing = (-0.2).sp),
-        headlineSmall = headlineSmall.copy(fontWeight = FontWeight.Medium),
-        titleLarge = titleLarge.copy(fontWeight = FontWeight.Medium),
-        titleMedium = titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        labelLarge = labelLarge.copy(fontWeight = FontWeight.SemiBold),
+        displaySmall = displaySmall.copy(fontFamily = Jost, fontWeight = FontWeight.Light, fontSize = 40.sp, lineHeight = 46.sp, letterSpacing = (-0.4).sp),
+        headlineLarge = headlineLarge.copy(fontFamily = Jost, fontWeight = FontWeight.Normal, letterSpacing = (-0.3).sp),
+        headlineMedium = headlineMedium.copy(fontFamily = Jost, fontWeight = FontWeight.Normal, fontSize = 30.sp, lineHeight = 36.sp, letterSpacing = (-0.2).sp),
+        headlineSmall = headlineSmall.copy(fontFamily = Jost, fontWeight = FontWeight.Normal, fontSize = 26.sp, lineHeight = 32.sp),
+        titleLarge = titleLarge.copy(fontFamily = Jost, fontWeight = FontWeight.Medium, fontSize = 23.sp),
+        titleMedium = titleMedium.copy(fontFamily = Jost, fontWeight = FontWeight.Medium, fontSize = 19.sp, lineHeight = 26.sp, letterSpacing = 0.sp),
+        titleSmall = titleSmall.copy(fontWeight = FontWeight.Medium),
+        labelLarge = labelLarge.copy(fontFamily = Jost, fontWeight = FontWeight.Medium, fontSize = 16.sp, letterSpacing = 0.2.sp),
     )
 }
+
+private val Shape = Shapes(
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(10.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)
+
+/**
+ * Brass as a fill, for controls that are a filled shape (the main button, a switch that is on, a slider, a chosen
+ * day): real brass with dark lettering on tin, the scheme's own bright brass on felt. The scheme's darker primary
+ * stays for brass text and icons, which need the contrast.
+ */
+val ColorScheme.brass: Color get() = if (surface.luminance() > 0.5f) Color(0xFFB98E2B) else primary
+val ColorScheme.onBrass: Color get() = if (surface.luminance() > 0.5f) Color(0xFF231700) else onPrimary
+
+@Composable
+fun brassButton() = ButtonDefaults.buttonColors(
+    containerColor = MaterialTheme.colorScheme.brass,
+    contentColor = MaterialTheme.colorScheme.onBrass,
+)
 
 /** Spacing steps. Tight inside a group, generous between groups. */
 object Space {
@@ -113,13 +157,23 @@ object Space {
     val l = 16.dp
     val xl = 24.dp
     val xxl = 32.dp
-    val screen = 20.dp
+    val screen = 16.dp
 }
 
 /** Tabular figures for battery, times and versions so values do not jitter. */
 val Tabular = TextStyle(fontFeatureSettings = "tnum")
 
+/**
+ * A mood's colour as the LEDs show it (hb_fx.c), for marks on the dark stage; [onLight] gives the same hue deep
+ * enough to read on the tin ground.
+ */
+fun moodColor(m: Mood, onLight: Boolean = false): Color = when (m) {
+    Mood.HEART -> if (onLight) Color(0xFFC81E2B) else Color(250, 52, 60)
+    Mood.SORRY -> if (onLight) Color(0xFFB85C00) else Color(235, 161, 23)
+    Mood.ANNOY -> if (onLight) Color(0xFF00757A) else Color(23, 231, 235)
+}
+
 @Composable
 fun HeartTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (dark) Dark else Light, typography = Type, content = content)
+    MaterialTheme(colorScheme = if (dark) Dark else Light, typography = Type, shapes = Shape, content = content)
 }

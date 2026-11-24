@@ -76,28 +76,37 @@ fun AppSettingsScreen(vm: AppSettingsVm, onBack: () -> Unit) {
         onPauseOrDispose {}
     }
 
+    SurfaceStatusBar()
     Scaffold(topBar = { BackBar("Settings", onBack) }) { pad ->
         LazyColumn(Modifier.fillMaxSize().padding(bottom = pad.calculateBottomPadding()), contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = Space.xxl)) {
             item { SectionTitle("Notifications") }
-            for (m in Mood.entries) {
-                item(key = m.wire) {
-                    val label = when (m) {
-                        Mood.HEART -> "Heart"
-                        Mood.SORRY -> "Sorry"
-                        Mood.ANNOY -> "Annoy"
-                    }
-                    SwitchRow(label, if (m == Mood.HEART) "When someone in your circle sends one" else null, local?.notify?.get(m) ?: true) {
-                        vm.notify(m, it)
+            item {
+                Group {
+                    Mood.entries.forEachIndexed { i, m ->
+                        val label = when (m) {
+                            Mood.HEART -> "Heart"
+                            Mood.SORRY -> "Sorry"
+                            Mood.ANNOY -> "Annoy"
+                        }
+                        if (i > 0) Line()
+                        SwitchRow(label, if (m == Mood.HEART) "When someone in your circle sends one" else null, local?.notify?.get(m) ?: true) {
+                            vm.notify(m, it)
+                        }
                     }
                 }
             }
 
             item { SectionTitle("This phone") }
-            item { FactRow("Model", phone.model) }
-            item { FactRow("Android", phone.android) }
-            item { FactRow("App version", BuildConfig.VERSION_NAME) }
-            item { FactRow("Bluetooth", phone.bluetooth, attention = phone.bluetooth != "On") }
             item {
+              Group {
+                FactRow("Model", phone.model)
+                Line()
+                FactRow("Android", phone.android)
+                Line()
+                FactRow("App version", BuildConfig.VERSION_NAME)
+                Line()
+                FactRow("Bluetooth", phone.bluetooth, attention = phone.bluetooth != "On")
+                Line()
                 FactRow(
                     "Notifications",
                     if (phone.notifications) "Allowed" else "Off",
@@ -108,22 +117,21 @@ fun AppSettingsScreen(vm: AppSettingsVm, onBack: () -> Unit) {
                         )
                     },
                 )
-            }
-            item {
+                Line()
                 FactRow(
                     "Battery optimisation",
                     if (phone.exempt) "Not restricted" else "Restricted",
                     attention = !phone.exempt,
                     onClick = if (phone.exempt) null else ({ ctx.startActivity(BatteryExemption.requestIntent(ctx)) }),
                 )
-            }
-            item {
+                Line()
                 val text = when (server) {
                     ServerLink.CONNECTED -> "Connected"
                     ServerLink.CONNECTING -> "Connecting"
                     ServerLink.OFFLINE -> "Offline"
                 }
                 FactRow("Server link", text, attention = server == ServerLink.OFFLINE)
+              }
             }
             if (!phone.exempt) {
                 item {
@@ -131,19 +139,19 @@ fun AppSettingsScreen(vm: AppSettingsVm, onBack: () -> Unit) {
                         "With battery optimisation on, Android may pause the link while the screen is off. Tap the row to allow background use.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = Space.screen, vertical = Space.xs),
+                        modifier = Modifier.padding(start = Space.screen + Space.s, end = Space.screen + Space.s, top = Space.m),
                     )
                 }
             }
 
             item { SectionTitle("Account") }
             item {
-                session?.let { ItemRow(it.user, "Signed in on ${it.host}") }
+                session?.let { Group { ItemRow(it.user, "Signed in on ${it.host}") } }
             }
             item {
                 OutlinedButton(
                     onClick = vm::logout,
-                    modifier = Modifier.padding(horizontal = Space.screen, vertical = Space.s).fillMaxWidth().height(48.dp),
+                    modifier = Modifier.padding(horizontal = Space.screen, vertical = Space.l).fillMaxWidth().height(52.dp),
                 ) { Text("Log out") }
             }
         }

@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -30,7 +32,6 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -46,9 +47,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -60,6 +63,8 @@ import androidx.lifecycle.viewModelScope
 import com.heartbeacon.app.data.HeartRepo
 import com.heartbeacon.app.data.WifiNet
 import com.heartbeacon.app.link.BatteryExemption
+import com.heartbeacon.app.ui.heart.BeaconFigure
+import com.heartbeacon.core.Fx
 import kotlinx.coroutines.launch
 
 class AddDeviceVm(private val repo: HeartRepo, start: Int) : ViewModel() {
@@ -149,19 +154,10 @@ class AddDeviceVm(private val repo: HeartRepo, start: Int) : ViewModel() {
 
 @Composable
 fun AddDeviceScreen(vm: AddDeviceVm, onFind: () -> Unit, onBack: () -> Unit, onDone: () -> Unit) {
+    SurfaceStatusBar()
     Scaffold(topBar = { BackBar("Add beacon", onBack) }) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
-            LinearProgressIndicator(
-                progress = { (vm.step + 1f) / AddDeviceVm.STEPS },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = Space.screen),
-                drawStopIndicator = {},
-            )
-            Text(
-                "Step ${vm.step + 1} of ${AddDeviceVm.STEPS}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = Space.screen, vertical = Space.s),
-            )
+            Steps(vm.step, AddDeviceVm.STEPS)
             AnimatedContent(
                 targetState = vm.step,
                 transitionSpec = { fadeIn(tween(220, delayMillis = 90)) togetherWith fadeOut(tween(90)) },
@@ -172,7 +168,7 @@ fun AddDeviceScreen(vm: AddDeviceVm, onFind: () -> Unit, onBack: () -> Unit, onD
                     Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = Space.screen, vertical = Space.l),
+                        .padding(horizontal = Space.xl, vertical = Space.l),
                     verticalArrangement = Arrangement.spacedBy(Space.l),
                 ) {
                     when (step) {
@@ -185,6 +181,29 @@ fun AddDeviceScreen(vm: AddDeviceVm, onFind: () -> Unit, onBack: () -> Unit, onD
                 }
             }
         }
+    }
+}
+
+/** Where you are in the five steps: one bar each, the ones behind you and the current one in brass. */
+@Composable
+private fun Steps(step: Int, of: Int) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        Modifier.padding(horizontal = Space.xl).padding(bottom = Space.s).clearAndSetSemantics { contentDescription = "Step ${step + 1} of $of" },
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        repeat(of) { i ->
+            Box(Modifier.weight(1f).height(4.dp).clip(CircleShape).background(if (i <= step) cs.brass else cs.surfaceContainerHighest))
+        }
+    }
+}
+
+/** The beacon on its cloth, pulsing blue the way the real one does in its pairing window. */
+@Composable
+private fun PairingFigure(content: @Composable () -> Unit = {}) {
+    Box(Modifier.fillMaxWidth().height(248.dp).clip(MaterialTheme.shapes.extraLarge), contentAlignment = Alignment.Center) {
+        BeaconFigure(play = Fx.Kind.PAIR, modifier = Modifier.fillMaxSize())
+        content()
     }
 }
 
@@ -218,15 +237,17 @@ private fun PermissionsStep(next: () -> Unit) {
     }
 
     Heading("Before we look for it", "Three things let your beacon reach you, even with the app closed.")
-    Column {
+    Group(inset = 0.dp) {
         Need("Nearby devices", "Talk to your beacon over Bluetooth", nearby) { ask.launch(Manifest.permission.BLUETOOTH_CONNECT) }
+        Line()
         Need("Notifications", "Tell you when a heart arrives", notify) { ask.launch(Manifest.permission.POST_NOTIFICATIONS) }
+        Line()
         Need("Run in background", "Keep the link alive when the screen is off", exempt) {
             exemption.launch(BatteryExemption.requestIntent(ctx))
         }
     }
     Spacer(Modifier.height(Space.s))
-    Button(onClick = next, enabled = nearby, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Continue") }
+    Button(onClick = next, enabled = nearby, colors = brassButton(), modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Continue") }
     if (!nearby) {
         Text(
             "Nearby devices is required. The other two can wait.",
@@ -238,7 +259,7 @@ private fun PermissionsStep(next: () -> Unit) {
 
 @Composable
 private fun Need(title: String, why: String, ok: Boolean, allow: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = Space.m), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = Space.m), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(end = Space.l)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(why, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -255,22 +276,16 @@ private fun Need(title: String, why: String, ok: Boolean, allow: () -> Unit) {
     }
 }
 
-/** The colour the hardware shows in its pairing window. A depiction of the device, not a UI accent. */
-private val PairBlue @Composable get() =
-    if (MaterialTheme.colorScheme.surface.red < 0.5f) Color(0xFF9DB8FF) else Color(0xFF3D63C9)
-
 @Composable
 private fun HoldStep(error: String?, onFind: () -> Unit) {
-    Box(Modifier.fillMaxWidth().padding(vertical = Space.xl), contentAlignment = Alignment.Center) {
-        LedRing(lit = true, color = PairBlue, size = 168.dp, pulse = true, body = true)
-    }
+    PairingFigure()
     Heading(
         "Hold its button for 5 seconds",
         "Keep holding until the lights pulse blue. It then stays ready to pair for 2 minutes.",
     )
     error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
     Spacer(Modifier.height(Space.s))
-    Button(onClick = onFind, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Find my beacon") }
+    Button(onClick = onFind, colors = brassButton(), modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Find my beacon") }
     Text(
         "Android lists the beacons it can see. Pick the one whose name starts with HB-.",
         style = MaterialTheme.typography.bodySmall,
@@ -280,9 +295,11 @@ private fun HoldStep(error: String?, onFind: () -> Unit) {
 
 @Composable
 private fun PairingStep() {
-    Box(Modifier.fillMaxWidth().padding(vertical = Space.xl), contentAlignment = Alignment.Center) {
-        LedRing(lit = true, color = PairBlue, size = 168.dp, pulse = true, body = true)
-        CircularProgressIndicator(Modifier.size(56.dp), strokeWidth = 3.dp)
+    PairingFigure()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        Spacer(Modifier.width(Space.m))
+        Text("Talking to your beacon…", style = MaterialTheme.typography.bodyMedium)
     }
     Heading("Pairing", "If Android asks to pair with your beacon, tap Pair.")
 }
@@ -298,14 +315,15 @@ private fun WifiStep(vm: AddDeviceVm) {
             Text("Your beacon is looking…", style = MaterialTheme.typography.bodyMedium)
         }
     } else {
-        Column {
-            list.forEach { n ->
+        Group(inset = 0.dp) {
+            list.forEachIndexed { i, n ->
+                if (i > 0) Line()
                 val selected = vm.chosen == n
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .selectable(selected, role = Role.RadioButton) { vm.choose(n) }
-                        .padding(vertical = Space.m),
+                        .padding(horizontal = Space.l, vertical = Space.m),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     RadioButton(selected = selected, onClick = null, modifier = Modifier.padding(end = Space.l))
@@ -336,6 +354,7 @@ private fun WifiStep(vm: AddDeviceVm) {
                 )
             }
             Button(
+                colors = brassButton(),
                 onClick = vm::join,
                 enabled = !vm.joining && (!n.secure || vm.psk.length >= 8),
                 modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -368,7 +387,7 @@ private fun NameStep(vm: AddDeviceVm, done: () -> Unit) {
         modifier = Modifier.fillMaxWidth(),
     )
     vm.claimError?.let { ErrorNote(it) }
-    Button(onClick = done, enabled = vm.name.isNotBlank() && !vm.claiming, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+    Button(onClick = done, enabled = vm.name.isNotBlank() && !vm.claiming, colors = brassButton(), modifier = Modifier.fillMaxWidth().height(52.dp)) {
         if (vm.claiming) {
             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
         } else {

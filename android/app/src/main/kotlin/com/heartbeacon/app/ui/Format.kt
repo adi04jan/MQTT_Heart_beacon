@@ -79,3 +79,17 @@ class Format(private val zone: ZoneId, private val locale: Locale) {
         Mark.EXPIRED -> "Expired"
     }
 }
+
+/**
+ * The awake part of a day as fractions of it (0 = midnight): one span, or two when the schedule runs past
+ * midnight; equal times are the whole day (PROTOCOL.md 7.2).
+ */
+fun awakeSpans(start: LocalTime, stop: LocalTime): List<Pair<Float, Float>> {
+    val a = start.toSecondOfDay() / 86_400f
+    val b = stop.toSecondOfDay() / 86_400f
+    return when {
+        stop == start -> listOf(0f to 1f)
+        stop > start -> listOf(a to b)
+        else -> listOf(0f to b, a to 1f).filter { it.second > it.first }
+    }
+}

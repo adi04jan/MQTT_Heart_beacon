@@ -3,5 +3,5 @@
     <style name="Theme.HeartBeacon" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/window</item>
     </style>
-    <color name="window">#141214</color>
+    <color name="window">#131211</color>
 </resources>

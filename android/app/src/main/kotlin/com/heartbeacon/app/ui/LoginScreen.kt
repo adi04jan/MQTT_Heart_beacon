@@ -2,17 +2,18 @@ package com.heartbeacon.app.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -28,7 +29,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -38,7 +41,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.heartbeacon.app.BuildConfig
 import com.heartbeacon.app.data.HeartRepo
-import com.heartbeacon.app.data.Mood
+import com.heartbeacon.app.ui.heart.BeaconFigure
+import com.heartbeacon.app.ui.heart.Stage
 import kotlinx.coroutines.launch
 
 class LoginVm(private val repo: HeartRepo) : ViewModel() {
@@ -67,26 +71,28 @@ class LoginVm(private val repo: HeartRepo) : ViewModel() {
 
 @Composable
 fun LoginScreen(vm: LoginVm) {
+    StatusBarIcons(dark = false)
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+      Column(Modifier.imePadding().verticalScroll(rememberScrollState())) {
+        // The beacon itself, unlit on its cloth, with the app's name set over the foot of the stage.
+        Box(Modifier.fillMaxWidth().height(372.dp).clip(RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp))) {
+            BeaconFigure(play = null, modifier = Modifier.fillMaxSize(), fit = 0.285f, at = 0.44f)
+            Text(
+                "Heart Beacon",
+                style = MaterialTheme.typography.displaySmall,
+                color = Stage.text,
+                modifier = Modifier.align(Alignment.BottomStart).padding(start = Space.xl, end = Space.xl, bottom = Space.xl),
+            )
+        }
         Column(
-            Modifier
-                .safeDrawingPadding()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = Space.xl),
+            Modifier.navigationBarsPadding().padding(start = Space.xl, end = Space.xl, top = Space.xl, bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.l),
         ) {
-            Spacer(Modifier.height(72.dp))
-            MoodIcon(Mood.HEART, MaterialTheme.colorScheme.primary, size = 40.dp)
-            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                Text("Heart Beacon", style = MaterialTheme.typography.headlineMedium)
-                Text(
-                    "Sign in with the account your admin set up for you.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.height(Space.s))
+            Text(
+                "Sign in with the account your admin set up for you.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             OutlinedTextField(
                 value = vm.user,
                 onValueChange = { vm.user = it },
@@ -122,6 +128,7 @@ fun LoginScreen(vm: LoginVm) {
             // Not tied to one field: wrong password, no route, an untrusted certificate and "wait" all land here.
             vm.error?.let { ErrorNote(it) }
             Button(
+                colors = brassButton(),
                 onClick = vm::submit,
                 enabled = vm.canSubmit,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -140,5 +147,6 @@ fun LoginScreen(vm: LoginVm) {
                 Text(if (vm.advanced) "Hide server address" else "Server address")
             }
         }
+      }
     }
 }

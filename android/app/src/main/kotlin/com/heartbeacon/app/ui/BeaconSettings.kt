@@ -2,14 +2,22 @@
 
 package com.heartbeacon.app.ui
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -18,12 +26,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MultiChoiceSegmentedButtonRow
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
@@ -33,22 +38,33 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import com.heartbeacon.app.data.DeviceSettings
+import kotlinx.coroutines.launch
 import java.time.LocalTime
 
 /** Which settings dialog is open. */
 enum class SettingsDialog { NAME, WIFI, START, STOP, REMOVE }
 
-/** The beacon's settings as list rows, for the Home list under the heart. */
+/** The beacon's settings, one plate per section, for the Home list under the heart. */
 fun LazyListScope.beaconSettings(
     cur: DeviceSettings,
     fmt: Format,
@@ -56,73 +72,75 @@ fun LazyListScope.beaconSettings(
     forget: (String) -> Unit,
     open: (SettingsDialog) -> Unit,
 ) {
-    fun hhmm(t: String) = fmt.clock(LocalTime.parse(t))
-    item { SectionTitle("Beacon") }
-    item { ItemRow("Name", cur.name, onClick = { open(SettingsDialog.NAME) }) }
-
-    item { SectionTitle("Wi-Fi") }
-    cur.wifi.forEach { ssid ->
-        item(key = "wifi-$ssid") {
-            ItemRow(ssid, "Saved on the beacon", trailing = { TextButton(onClick = { forget(ssid) }) { Text("Forget") } })
-        }
-    }
-    if (cur.wifi.size < 4) {
-        item {
-            ItemRow("Add network", onClick = { open(SettingsDialog.WIFI) }, trailing = {
-                VectorIcon(Icons.Filled.Add, MaterialTheme.colorScheme.onSurfaceVariant, 22.dp)
-            })
-        }
-    }
-    item {
-        SwitchRow(
-            "Use Wi-Fi when your phone is away",
-            "Off keeps the beacon on Bluetooth only. It goes quiet when your phone leaves.",
-            cur.useWifiAway,
-        ) { update(cur.copy(useWifiAway = it)) }
-    }
+    val start = LocalTime.parse(cur.start)
+    val stop = LocalTime.parse(cur.stop)
 
     item { SectionTitle("Auto on and off") }
     item {
-        SwitchRow(
-            "Sleep outside these hours",
-            "Hearts sent while it sleeps play when it wakes.",
-            cur.schedOn,
-        ) { update(cur.copy(schedOn = it)) }
-    }
-    item { Days(cur.days, cur.schedOn) { update(cur.copy(days = it)) } }
-    item {
-        Row {
-            Column(Modifier.weight(1f)) { ItemRow("Wakes", hhmm(cur.start), onClick = { open(SettingsDialog.START) }) }
-            Column(Modifier.weight(1f)) {
-                ItemRow("Sleeps", fmt.sleeps(LocalTime.parse(cur.start), LocalTime.parse(cur.stop)), onClick = { open(SettingsDialog.STOP) })
-            }
+        Group {
+            SwitchRow(
+                "Sleep outside these hours",
+                "Hearts sent while it sleeps play when it wakes.",
+                cur.schedOn,
+            ) { update(cur.copy(schedOn = it)) }
+            Line()
+            DayPlan(start, stop, cur.schedOn, fmt, open)
+            Line()
+            Days(cur.days, cur.schedOn) { update(cur.copy(days = it)) }
         }
     }
 
     item { SectionTitle("Light and power") }
-    item { Brightness(cur.bright) { update(cur.copy(bright = it)) } }
     item {
-        SwitchRow(
-            "Nap when idle",
-            "After 90 minutes with no hearts it naps and checks in every 15 minutes. Saves battery; hearts can take up to 15 minutes.",
-            cur.napWhenIdle,
-        ) { update(cur.copy(napWhenIdle = it)) }
+        Group {
+            Brightness(cur.bright) { update(cur.copy(bright = it)) }
+            Line()
+            SwitchRow(
+                "Nap when idle",
+                "After 90 minutes with no hearts it naps and checks in every 15 minutes. Saves battery; hearts can take up to 15 minutes.",
+                cur.napWhenIdle,
+            ) { update(cur.copy(napWhenIdle = it)) }
+        }
     }
 
-    item { SectionTitle("Firmware") }
+    item { SectionTitle("Wi-Fi") }
     item {
-        ItemRow(
-            if (cur.fw.isEmpty()) "Version not reported yet" else "Version ${cur.fw}",
-            cur.fwAvailable?.let { "$it is ready. Installs over Wi-Fi with at least 70% battery." } ?: "Up to date",
-            trailing = cur.fwAvailable?.let { { FilledTonalButton(onClick = {}) { Text("Update") } } },
-        )
+        Group {
+            cur.wifi.forEach { ssid ->
+                ItemRow(ssid, "Saved on the beacon", trailing = { TextButton(onClick = { forget(ssid) }) { Text("Forget") } })
+                Line()
+            }
+            if (cur.wifi.size < 4) {
+                ItemRow("Add network", onClick = { open(SettingsDialog.WIFI) }, trailing = {
+                    VectorIcon(Icons.Filled.Add, MaterialTheme.colorScheme.primary, 22.dp)
+                })
+                Line()
+            }
+            SwitchRow(
+                "Use Wi-Fi when your phone is away",
+                "Off keeps the beacon on Bluetooth only. It goes quiet when your phone leaves.",
+                cur.useWifiAway,
+            ) { update(cur.copy(useWifiAway = it)) }
+        }
     }
 
+    item { SectionTitle("Beacon") }
     item {
-        OutlinedButton(
+        Group {
+            ItemRow("Name", cur.name, onClick = { open(SettingsDialog.NAME) })
+            Line()
+            ItemRow(
+                if (cur.fw.isEmpty()) "Version not reported yet" else "Version ${cur.fw}",
+                cur.fwAvailable?.let { "$it is ready. Installs over Wi-Fi with at least 70% battery." } ?: "Up to date",
+                trailing = cur.fwAvailable?.let { { FilledTonalButton(onClick = {}) { Text("Update") } } },
+            )
+        }
+    }
+    item {
+        TextButton(
             onClick = { open(SettingsDialog.REMOVE) },
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-            modifier = Modifier.padding(start = Space.screen, end = Space.screen, top = Space.xxl).fillMaxWidth().height(48.dp),
+            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            modifier = Modifier.padding(start = Space.screen, end = Space.screen, top = Space.s).fillMaxWidth().height(48.dp),
         ) { Text("Remove beacon") }
     }
 }
@@ -157,26 +175,95 @@ fun SettingsDialogs(
     }
 }
 
+/** The day as a bar, midnight to midnight, with the hours the beacon is awake filled in; the two times under it. */
+@Composable
+private fun DayPlan(start: LocalTime, stop: LocalTime, enabled: Boolean, fmt: Format, open: (SettingsDialog) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val fill = if (enabled) cs.brass else cs.onSurface.copy(alpha = 0.28f)
+    val track = cs.surfaceContainerHighest
+    val tick = cs.outline
+    val spans = awakeSpans(start, stop)
+    Column(Modifier.padding(top = Space.l)) {
+        Canvas(
+            Modifier
+                .padding(horizontal = Space.l)
+                .fillMaxWidth()
+                .height(22.dp)
+                .semantics { contentDescription = "Awake from ${fmt.clock(start)} to ${fmt.sleeps(start, stop)}" },
+        ) {
+            val h = 10.dp.toPx()
+            val round = CornerRadius(h / 2)
+            drawRoundRect(track, size = Size(size.width, h), cornerRadius = round)
+            for ((a, b) in spans) {
+                drawRoundRect(fill, topLeft = Offset(size.width * a, 0f), size = Size(size.width * (b - a), h), cornerRadius = round)
+            }
+            for (i in 1..3) {
+                val x = size.width * i / 4f
+                drawLine(tick, Offset(x, h + 4.dp.toPx()), Offset(x, h + 10.dp.toPx()), strokeWidth = 1.dp.toPx())
+            }
+        }
+        Row(Modifier.padding(horizontal = Space.l).fillMaxWidth().clearAndSetSemantics {}) {
+            Spacer(Modifier.weight(0.5f))
+            for (hour in listOf(6, 12, 18)) {
+                Text(
+                    fmt.clock(LocalTime.of(hour, 0)),
+                    style = MaterialTheme.typography.labelSmall.merge(Tabular),
+                    color = cs.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Spacer(Modifier.weight(0.5f))
+        }
+        Row(Modifier.padding(top = Space.xs)) {
+            TimeCell("Wakes", fmt.clock(start), Modifier.weight(1f)) { open(SettingsDialog.START) }
+            TimeCell("Sleeps", fmt.sleeps(start, stop), Modifier.weight(1f)) { open(SettingsDialog.STOP) }
+        }
+    }
+}
+
+@Composable
+private fun TimeCell(label: String, value: String, modifier: Modifier, onClick: () -> Unit) {
+    Column(modifier.clickable(role = Role.Button, onClickLabel = "Change", onClick = onClick).padding(horizontal = Space.l, vertical = Space.m)) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.titleLarge.merge(Tabular), color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
 @Composable
 private fun Days(days: String, enabled: Boolean, onChange: (String) -> Unit) {
     val labels = listOf("M", "T", "W", "T", "F", "S", "S")
     val names = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-    MultiChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = Space.screen, vertical = Space.s)) {
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth().padding(horizontal = Space.s, vertical = Space.m)) {
         labels.forEachIndexed { i, l ->
             val on = days.getOrNull(i) == '1'
-            SegmentedButton(
-                checked = on,
-                onCheckedChange = { c -> onChange(days.padEnd(7, '0').replaceRange(i, i + 1, if (c) "1" else "0")) },
-                shape = SegmentedButtonDefaults.itemShape(i, 7),
-                colors = SegmentedButtonDefaults.colors(
-                    activeContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                    activeContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                ),
-                enabled = enabled,
-                icon = {},
-                label = { Text(l) },
-                modifier = Modifier.semantics { contentDescription = names[i] },
-            )
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .toggleable(
+                        value = on,
+                        enabled = enabled,
+                        role = Role.Checkbox,
+                        onValueChange = { c -> onChange(days.padEnd(7, '0').replaceRange(i, i + 1, if (c) "1" else "0")) },
+                    )
+                    .semantics { contentDescription = names[i] },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .alpha(if (enabled) 1f else 0.38f)
+                        .clip(CircleShape)
+                        .background(if (on) cs.brass else Color.Transparent)
+                        .border(1.dp, if (on) Color.Transparent else cs.outlineVariant, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(l, style = MaterialTheme.typography.labelLarge, color = if (on) cs.onBrass else cs.onSurfaceVariant)
+                }
+            }
         }
     }
 }
@@ -184,12 +271,19 @@ private fun Days(days: String, enabled: Boolean, onChange: (String) -> Unit) {
 @Composable
 private fun Brightness(value: Int, onDone: (Int) -> Unit) {
     var v by remember(value) { mutableFloatStateOf(value.toFloat()) }
-    Column(Modifier.padding(horizontal = Space.screen, vertical = Space.s)) {
+    Column(Modifier.padding(start = Space.l, end = Space.l, top = Space.l, bottom = Space.xs)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Brightness", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-            Text("${v.toInt()}%", style = MaterialTheme.typography.bodyMedium.merge(Tabular), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${v.toInt()}%", style = MaterialTheme.typography.titleMedium.merge(Tabular), color = MaterialTheme.colorScheme.onSurface)
         }
-        Slider(value = v, onValueChange = { v = it }, valueRange = 5f..100f, onValueChangeFinished = { onDone(v.toInt()) })
+        Slider(
+            value = v,
+            onValueChange = { v = it },
+            valueRange = 5f..100f,
+            onValueChangeFinished = { onDone(v.toInt()) },
+            colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.brass, activeTrackColor = MaterialTheme.colorScheme.brass),
+            modifier = Modifier.semantics { contentDescription = "Brightness" },
+        )
     }
 }
 
@@ -213,7 +307,7 @@ private fun WifiDialog(dismiss: () -> Unit, join: suspend (String, String) -> St
     var psk by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = dismiss,
         title = { Text("Add network") },
@@ -251,7 +345,7 @@ private fun WifiDialog(dismiss: () -> Unit, join: suspend (String, String) -> St
 @Composable
 private fun TimeDialog(title: String, current: String, dismiss: () -> Unit, save: (String) -> Unit) {
     val t = LocalTime.parse(current)
-    val state = rememberTimePickerState(t.hour, t.minute, is24Hour = android.text.format.DateFormat.is24HourFormat(androidx.compose.ui.platform.LocalContext.current))
+    val state = rememberTimePickerState(t.hour, t.minute, is24Hour = android.text.format.DateFormat.is24HourFormat(LocalContext.current))
     AlertDialog(
         onDismissRequest = dismiss,
         title = { Text(title) },
