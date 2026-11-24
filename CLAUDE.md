@@ -205,8 +205,14 @@ persistent sessions (only the beacons use `cleanSession=false`). Rollback: remov
 v2 never touches that shared broker: it runs its **own** Mosquitto 1.6.9 instance (`deploy/mosquitto-hb.conf`,
 `/etc/mosquitto-hb/`, unit `hb-mosquitto`) with TLS 8883 and the router on loopback **1884** (1883 is taken), auth
 via a server-written `password_file` (mosquitto_passwd 1.6 format) + `pattern` ACL. One `hb-server` process serves
-the API (8443), admin (127.0.0.1:8444) and the router. Deploy needs from the user: public IP, port forwards
-8883/8443, Python >= 3.11 via uv (Ubuntu 20.04 ships 3.8), `age`, the beacon dids. Not deployed yet.
+the API (8443), admin (127.0.0.1:8444) and the router.
+
+Deployed 2026-11-24 from `2d20277` (`deploy/RUNBOOK.md`). Server access from this PC: ssh alias `Home_Main_Server`
+(key auth, passwordless `sudo -n`); the source tree it was installed from is `~/hb-src` there (re-run
+`install.sh --apply <IP>` from a fresh `git archive HEAD server deploy` to update). The CA private key lives only on
+the dev PC in `%USERPROFILE%\hb-pki-backup` with the smoke users' passwords. Still to do: router forwards 8883/8443,
+`age` for encrypted backups, real users and beacons. The `health_dash` session knows the box (other services,
+cron, pump rules); leave the shared `mosquitto`, `telegram_heart` and `mqtt-payload-log` alone.
 
 ## Bridge service (server)
 

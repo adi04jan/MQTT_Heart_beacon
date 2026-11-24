@@ -58,7 +58,7 @@ Tick a box only after its bench check passed.
 - [x] 6. Circles: one circle, everyone receives
 - [x] 7. Missed hearts: play on wake, coalesced, 24 h
 - [x] 8. Server: existing home server via public IP (SSH-tunnel admin)
-- [ ] Follow-up: is the home ISP public IP static? (needed before M2; port-forward 8883/8443)
+- [x] Follow-up: home public IP is static (2026-11-24); port forwards 8883/8443 still to add on the router
 
 ## C. v2 milestones
 
@@ -79,7 +79,9 @@ Tick a box only after its bench check passed.
 - [x] Minimal admin (devices, users, register/assign, config edit) on 127.0.0.1; `backup.sh` restore checked in WSL (age branch untested)
 - [x] Real-broker ACL test: runs in WSL against apt Mosquitto 1.6.9 (`deploy/e2e-local.sh`), 2026-11-24
 - [x] Deploy kit: `install.sh` (dry run by default, `--apply`, refuses to touch the shared broker, no root writes in hb-owned dirs), `uninstall.sh`, `hb-admin`, `RUNBOOK.md`; local e2e `smoke.py` SMOKE PASS 15/15 (lead-verified 2026-11-24)
-- [ ] Deploy on the ThinkCentre (needs user: public IP, port forwards 8883/8443, beacon dids, user names, who runs it)
+- [x] Deployed on the ThinkCentre 2026-11-24 (2d20277): `hb-mosquitto` + `hb-server` enabled, shared broker / bridge / logger untouched (same start time), CA key moved off-box, smoke users + `HB-000001` registered; smoke.py 15/15 PASS through an ssh tunnel (TLS still verified against the public IP)
+- [ ] Router: forward TCP 8883 and 8443 to the server (both time out from outside today)
+- [ ] Real users + beacons in `hb-admin` (needs: both users' uid + display name, the other beacon's did)
 - [ ] Bench: smoke.py from outside the LAN against the public IP
 
 ### M3 firmware WiFi + MQTT
