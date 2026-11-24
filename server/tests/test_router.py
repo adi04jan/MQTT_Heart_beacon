@@ -347,3 +347,15 @@ def test_cfg_is_never_sent_in_a_relay():
     assert out == []
     router._send(st, st.beacons[B], "ble", env("show", "3" * 16, k="heart"), 1000, out)
     assert [json.loads(p.payload)["m"]["t"] for p in out] == ["show"]
+
+
+def test_glue_picks_up_users_and_claims_written_by_the_admin_cli(tmp_path):
+    from hb_server import router
+    g = router.Glue(Db(str(tmp_path / "hb.db")), "127.0.0.1", 1, "pw", clock=lambda: 1000)
+    g.poll()
+    assert g.state.users == {}
+    cli = Db(str(tmp_path / "hb.db"))  # another process: `hb-admin adduser` / `register` while the server runs
+    cli.x("INSERT INTO user (uid, name, pw, mqtt_pass, mqtt_hash) VALUES ('bob', 'Bob', '', '', '')")
+    cli.x("INSERT INTO device (did, owner, claimed, registered) VALUES (?, 'bob', 1, 0)", (B,))
+    g.poll()
+    assert set(g.state.users) == {"bob"} and g.state.beacons[B].owner == "bob"
