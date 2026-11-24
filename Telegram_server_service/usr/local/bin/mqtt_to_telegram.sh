@@ -15,7 +15,7 @@ MQTT_TOPIC="/topic/subtopic/"
 
 MQTT_MSG_1="Miss you"
 MQTT_MSG_2="Online"
-MQTT_MSG_3="LOW BATT"
+MQTT_MSG_3="BATT_STATUS"
 MQTT_MSG_4="DEEP SLEEP"
 MQTT_GO_SLEEP="GO_DEEP_SLEEP"
 MQTT_MSG_SORRY="Sorry"
@@ -57,10 +57,13 @@ mqtt_listener() {
         if [[ -n "$chip_id" && -n "$msg" && -n "$volt" && -z "$raw" ]]; then
             for uid in "${!USERS[@]}"; do
                 if [[ "${USERS[$uid]}" == "${USERS[1273591783]}" ]]; then
-                    # Admin (Aditya) sees full info
+                    # Admin (Aditya) sees full info, except routine battery reports (a low battery still comes through)
+                    if [[ "$msg" == "$MQTT_MSG_3" ]] && awk -v v="$volt" 'BEGIN { exit !(v >= 3.5) }'; then
+                        continue
+                    fi
                     send_telegram_message "$uid" "📡 Message received from chip: $chip_id, Message: $msg, Battery: $volt"
-                else
-                    # Others just see simplified notification
+                elif [[ "$msg" == "$MQTT_MSG_1" ]]; then
+                    # Others only get real hearts, not Online / BATT_STATUS / DEEP SLEEP / details replies
                     send_telegram_message "$uid" "❤️ Miss you"
                 fi
             done
