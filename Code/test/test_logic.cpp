@@ -78,7 +78,38 @@ static void test_version() {
   assert(!version_is_newer("<html>", "0.1.0"));
 }
 
+static void test_schedule() {
+  const Schedule office = { 0b01111110, 9 * 60, 19 * 60 };  // Mon-Sat 09:00-19:00
+  const uint32_t H = 3600;
+  enum { SUN, MON, TUE, WED, THU, FRI, SAT };
+  assert(seconds_until_on(office, MON, 10 * H) == 0);
+  assert(seconds_until_on(office, SAT, 19 * H - 1) == 0);            // last second of Saturday
+  assert(seconds_until_on(office, MON, 9 * H - 60) == 60);           // 08:59 -> one minute
+  assert(seconds_until_on(office, MON, 19 * H) == 14 * H);           // 19:00 Mon -> 09:00 Tue
+  assert(seconds_until_on(office, MON, 23 * H) == 10 * H);           // late night
+  assert(seconds_until_on(office, TUE, 2 * H) == 7 * H);             // after midnight
+  assert(seconds_until_on(office, SAT, 19 * H) == 24 * H + 14 * H);  // Sat evening -> Mon (skips Sunday)
+  assert(seconds_until_on(office, SUN, 12 * H) == 21 * H);           // Sunday noon -> Mon 09:00
+  // Commanded sleep inside office hours: next start is tomorrow's, not today's.
+  assert(seconds_to_next_start(office, WED, 14 * H) == 19 * H);      // Wed 14:00 -> Thu 09:00
+  assert(seconds_to_next_start(office, SAT, 10 * H) == 47 * H);      // Sat 10:00 -> Mon 09:00
+  assert(seconds_to_next_start(office, FRI, 8 * H) == 1 * H);        // before today's start
+  // No days enabled: never sleeps.
+  const Schedule none = { 0, 9 * 60, 19 * 60 };
+  assert(seconds_until_on(none, MON, 23 * H) == 0);
+  assert(seconds_to_next_start(none, MON, 23 * H) == 0);
+}
+
+static void test_offline_retry() {
+  assert(offline_retry_s(0) == 60);
+  assert(offline_retry_s(1) == 180);
+  assert(offline_retry_s(2) == 900);
+  assert(offline_retry_s(255) == 900);
+}
+
 int main() {
+  test_offline_retry();
+  test_schedule();
   test_version();
   test_button();
   test_battery();

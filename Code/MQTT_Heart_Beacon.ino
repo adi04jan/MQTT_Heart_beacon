@@ -5,12 +5,14 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include "esp_sleep.h"
+#include "esp_sntp.h"
+#include <time.h>
 #include "credential.h"
 #include "beacon_logic.h"
 
 //#define TEST_ADC 1
 #define DUMMY_VOLTAGE 5096
-#define CURRENT_FIRMWARE_VERSION "0.1.1"  // Change this as needed
+#define CURRENT_FIRMWARE_VERSION "0.1.2"  // Change this as needed
 #define USER_BTN 0
 #define LED_PIN 2
 #define BATT_PIN A3
@@ -23,7 +25,7 @@ const uint32_t WIFI_FAST_TIMEOUT_MS = 5000;               // cached AP + channel
 const uint32_t WIFI_SCAN_TIMEOUT_MS = 10000;              // per known SSID found by a scan
 const uint32_t MQTT_RETRY_MS = 5000;
 const uint32_t OFFLINE_SLEEP_AFTER_MS = 5UL * 60 * 1000;  // offline this long -> deep sleep
-const uint64_t OFFLINE_SLEEP_US = 15ULL * 60 * 1000000;   // ... and retry after 15 min (or button)
+RTC_DATA_ATTR uint8_t offline_fails = 0;                   // ... and retry after offline_retry_s(): 1, 3, then 15 min
 const uint32_t BATT_CHECK_MS = 15000;
 const uint32_t BATT_REPORT_MS = 30UL * 60 * 1000;
 const uint32_t OTA_TIMEOUT_MS = 120000;
@@ -31,6 +33,21 @@ const uint32_t OTA_TIMEOUT_MS = 120000;
 // be queued from while we were away and ignored. v2 adds timestamps.
 const uint32_t SLEEP_GUARD_MS = 60000;
 uint32_t mqtt_up_at = 0;
+
+// Office hours, local time. A bench build may override these in its credential.h.
+#ifndef OFFICE_DAYS
+#define OFFICE_DAYS 0b01111110  // Mon-Sat (bit n = tm_wday n, 0 = Sunday)
+#define OFFICE_START_MIN (9 * 60)
+#define OFFICE_STOP_MIN (19 * 60)
+#endif
+#ifndef MAX_SLEEP_S
+#define MAX_SLEEP_S (3UL * 3600)  // ponytail: the RC sleep timer drifts; wake and resync NTP at least this often
+#endif
+const Schedule OFFICE = { OFFICE_DAYS, OFFICE_START_MIN, OFFICE_STOP_MIN };
+const char *TZ_INFO = "IST-5:30";
+const uint32_t SCHED_GRACE_MS = 5UL * 60 * 1000;  // out of hours, stay up this long after power-on or a press
+uint32_t hold_start = 0, hold_ms = 0;             // schedule sleep held off while millis() - hold_start < hold_ms
+RTC_DATA_ATTR time_t wake_at = 0;                  // end of a timed sleep in progress (0 = none)
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -139,30 +156,91 @@ void publishMqttMessage(const char *topic, const char *message) {
   doc["id"] = WiFi.macAddress();
   doc["message"] = message;
   doc["volt"] = check_batt_voltage() / 1000.0;
-  char buffer[256];
+  char buffer[384];  // details reply carries wifi + last sleep + boot trail
   size_t n = serializeJson(doc, buffer);
   // uint8_t* overload: the old char* call matched publish(topic, payload, retained) and retained every message.
   bool ok = client.publish(topic, (const uint8_t *)buffer, n, false);
   Serial.printf("[MQTT] %s: %s\n", ok ? "Sent" : "SEND FAILED", buffer);
 }
 
-void deep_sleep(uint64_t timer_us) {
+RTC_DATA_ATTR char last_sleep[64];  // why / when / how long the last deep sleep was; reported at boot and in details
+// Boot breadcrumbs (B<cause> W/w wifi T/t clock O ota M/m<rc> mqtt): survive sleep, so a wake that dies before
+// MQTT still shows where it stopped. prev_trail = the previous boot's trail.
+RTC_DATA_ATTR char trail[48];
+char prev_trail[48];
+void crumb(const char *s) {
+  strncat(trail, s, sizeof(trail) - strlen(trail) - 1);
+}
+
+void deep_sleep(uint64_t timer_us, const char *why) {
+  time_t t = time(nullptr);
+  struct tm lt;
+  localtime_r(&t, &lt);
+  snprintf(last_sleep, sizeof(last_sleep), "%s at %02d:%02d:%02d for %llus", why, lt.tm_hour, lt.tm_min, lt.tm_sec,
+           timer_us / 1000000ULL);
   if (client.connected()) client.disconnect();  // broker marks us offline now and starts queueing
   strip.clear();
   strip.show();
   esp_deep_sleep_enable_gpio_wakeup(1ULL << USER_BTN, ESP_GPIO_WAKEUP_GPIO_LOW);
   if (timer_us) esp_sleep_enable_timer_wakeup(timer_us);
-  Serial.printf("Going for deep sleep (timer %llu s)\n", timer_us / 1000000ULL);
+  Serial.printf("Going for deep sleep: %s\n", last_sleep);
   Serial.flush();
   esp_deep_sleep_start();
 }
 
-void go_to_sleep() {
+static bool clock_valid() {
+  return time(nullptr) > 1700000000;
+}
+
+// Office-schedule seconds from now: until hours start again (0 = inside hours), or until the strictly next start.
+// 0 when the clock is unknown, so an unsynced beacon stays awake.
+static uint32_t schedule_seconds(bool next_start) {
+  if (!clock_valid()) return 0;
+  time_t t = time(nullptr);
+  struct tm lt;
+  localtime_r(&t, &lt);
+  uint32_t sod = lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec;
+  return next_start ? seconds_to_next_start(OFFICE, lt.tm_wday, sod) : seconds_until_on(OFFICE, lt.tm_wday, sod);
+}
+
+// Deep sleep until epoch t, in chunks of at most MAX_SLEEP_S (each wake resyncs the clock), or until the button.
+void sleep_until(time_t t, const char *why) {
+  wake_at = t;
+  time_t now = time(nullptr);
+  uint64_t s = t > now ? (uint64_t)(t - now) : 1;
+  if (s > MAX_SLEEP_S) s = MAX_SLEEP_S;
+  Serial.printf("Sleeping until %s", ctime(&t));
+  deep_sleep(s * 1000000ULL, why);
+}
+
+void sync_time() {
+  configTzTime(TZ_INFO, "pool.ntp.org", "time.google.com");
+  uint32_t t0 = millis();
+  while (esp_sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && millis() - t0 < 3000) delay(50);
+  time_t t = time(nullptr);
+  Serial.printf("Clock %s: %s", clock_valid() ? "ok" : "UNKNOWN", ctime(&t));
+}
+
+// Offline: sleep until office hours if we are outside them, else retry after 1, 3, then 15 min (a weak-signal
+// miss right at office start used to cost 15 min). Button wakes either way.
+void sleep_offline() {
+  uint32_t off = schedule_seconds(false);
+  if (off) sleep_until(time(nullptr) + off, "offline, out of hours");
+  uint32_t s = offline_retry_s(offline_fails);
+  if (offline_fails < 255) offline_fails++;
+  deep_sleep(s * 1000000ULL, "offline");
+}
+
+// Announced sleep. Commanded: until the next office start (or button). Low battery: button only.
+void go_to_sleep(bool until_office) {
   if (client.connected()) {
     publishMqttMessage(MQTT_TOPIC, MQTT_MSG_4);
     delay(1000);  // let TCP flush
   }
-  deep_sleep(0);  // button wake only
+  uint32_t s = until_office ? schedule_seconds(true) : 0;
+  if (s) sleep_until(time(nullptr) + s, "sleep command");
+  wake_at = 0;
+  deep_sleep(0, until_office ? "sleep command, clock unknown" : "low battery");
 }
 
 void low_batt_notify() {
@@ -177,7 +255,7 @@ void low_batt_notify() {
     strip.show();
     delay(500);
   }
-  if (mv <= MIN_MV) go_to_sleep();
+  if (mv <= MIN_MV) go_to_sleep(false);
 }
 
 static bool wait_connected(uint32_t timeout_ms) {
@@ -320,10 +398,15 @@ bool mqtt_connect() {
   // `queue_qos0_messages true` on the broker.
   if (!client.connect(id.c_str(), MQTT_USER, MQTT_PASS, nullptr, 0, false, nullptr, false)) {
     Serial.printf("MQTT connect failed, rc=%d\n", client.state());
+    char c[8];
+    snprintf(c, sizeof(c), "m%d", client.state());
+    crumb(c);
     return false;
   }
   mqtt_up_at = millis();
+  offline_fails = 0;
   Serial.println("MQTT connected as " + id);
+  crumb("M");
   client.subscribe(MQTT_TOPIC, 1);
   publishMqttMessage(MQTT_TOPIC, MQTT_MSG_2);  // Online
   if (pending_heart) {
@@ -341,11 +424,21 @@ void send_heart() {
 void setup() {
   setCpuFrequencyMhz(80);  // lowest clock WiFi allows
   Serial.begin(115200);
+  setenv("TZ", TZ_INFO, 1);  // local time from the RTC works before WiFi/NTP
+  tzset();
   analogReadResolution(12);
   pinMode(USER_BTN, INPUT_PULLUP);
   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-  bool quiet = cause == ESP_SLEEP_WAKEUP_TIMER;  // offline retry: no animations
-  Serial.printf("Heart beacon %s, wakeup cause %d\n", CURRENT_FIRMWARE_VERSION, (int)cause);
+  bool quiet = cause == ESP_SLEEP_WAKEUP_TIMER;  // offline retry or night check-in: no animations
+  if (!quiet) wake_at = 0;                       // power-on or button: the user wants it up now
+  Serial.printf("Heart beacon %s, wakeup cause %d, last sleep: %s\n", CURRENT_FIRMWARE_VERSION, (int)cause,
+                last_sleep[0] ? last_sleep : "-");
+  memcpy(prev_trail, trail, sizeof(trail));
+  Serial.printf("Previous boot trail: %s\n", prev_trail[0] ? prev_trail : "-");
+  trail[0] = 0;
+  char c[8];
+  snprintf(c, sizeof(c), "B%d", (int)cause);
+  crumb(c);
   strip.begin();
   strip.show();
   button.begin(digitalRead(USER_BTN) == LOW, millis());
@@ -360,10 +453,24 @@ void setup() {
     if (round > 0) heartbeat_effect(strip.Color(0, 0, 100), 1, 10);  // blue: still searching
     online = connect_wifi();
   }
-  if (!online) deep_sleep(OFFLINE_SLEEP_US);
-  if (!quiet) heartbeat_effect(strip.Color(120, 120, 120), 1, 10);  // white: connected
+  crumb(online ? "W" : "w");
+  if (online) {
+    sync_time();
+    crumb(clock_valid() ? "T" : "t");
+  }
+  // A timed sleep is still running (night check-in): straight back to sleep, no MQTT, so nothing plays at night.
+  if (wake_at && clock_valid() && time(nullptr) < wake_at - 30) sleep_until(wake_at, "check-in, still out of hours");
+  wake_at = 0;
+  if (!online) sleep_offline();
+  if (!quiet) {
+    heartbeat_effect(strip.Color(120, 120, 120), 1, 10);  // white: connected
+    hold_start = millis();
+    hold_ms = SCHED_GRACE_MS;
+  }
+  STATUS_FLAG = !quiet;  // details reply only on user-started boots (the bridge relays it to Telegram)
 
   perform_ota();
+  crumb("O");
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
   client.setKeepAlive(60);      // fewer pings than the 15 s default
@@ -374,17 +481,30 @@ void setup() {
 }
 
 void loop() {
-  static uint32_t last_mqtt_try = 0, offline_since = 0, last_batt = 0, last_report = 0;
+  static uint32_t last_mqtt_try = 0, offline_since = 0, last_batt = 0, last_report = 0, last_sched = 0;
   uint32_t now = millis();
 
   if (!client.connected()) {
     if (!offline_since) offline_since = now | 1;
     if (every(now, last_mqtt_try, MQTT_RETRY_MS) && mqtt_connect()) offline_since = 0;
-    else if (now - offline_since > OFFLINE_SLEEP_AFTER_MS) deep_sleep(OFFLINE_SLEEP_US);
+    else if (now - offline_since > OFFLINE_SLEEP_AFTER_MS) sleep_offline();
   }
   client.loop();
 
-  switch (button.update(digitalRead(USER_BTN) == LOW, millis())) {
+  if (every(now, last_sched, 60000) && now - hold_start >= hold_ms) {
+    uint32_t off = schedule_seconds(false);
+    if (off) {
+      Serial.println("Out of office hours");
+      sleep_until(time(nullptr) + off, "out of office hours");
+    }
+  }
+
+  BtnEvent ev = button.update(digitalRead(USER_BTN) == LOW, millis());
+  if (ev != BtnEvent::None) {
+    hold_start = millis();  // a press out of hours keeps it up a while
+    hold_ms = SCHED_GRACE_MS;
+  }
+  switch (ev) {
     case BtnEvent::Short: send_heart(); break;
     case BtnEvent::Long:
       battery_level_show();
@@ -399,12 +519,13 @@ void loop() {
 
   if (STATUS_FLAG && client.connected()) {
     STATUS_FLAG = false;
-    String final_msg = String(CURRENT_FIRMWARE_VERSION) + " | " + get_connected_wifi_info();
+    String final_msg = String(CURRENT_FIRMWARE_VERSION) + " | " + get_connected_wifi_info() + " | last sleep: " +
+                       (last_sleep[0] ? last_sleep : "-") + " | prev boot: " + (prev_trail[0] ? prev_trail : "-");
     publishMqttMessage(MQTT_TOPIC, final_msg.c_str());
   }
   if (SLEEP_FLAG) {
     SLEEP_FLAG = false;
-    go_to_sleep();
+    go_to_sleep(true);
   }
   delay(10);
 }
