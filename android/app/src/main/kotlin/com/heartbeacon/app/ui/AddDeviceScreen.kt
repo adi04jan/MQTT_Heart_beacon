@@ -31,6 +31,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -366,5 +367,12 @@ private fun NameStep(vm: AddDeviceVm, done: () -> Unit) {
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
     )
-    Button(onClick = done, enabled = vm.name.isNotBlank(), modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Done") }
+    vm.claimError?.let { ErrorNote(it) }
+    Button(onClick = done, enabled = vm.name.isNotBlank() && !vm.claiming, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+        if (vm.claiming) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
+        } else {
+            Text("Done")
+        }
+    }
 }

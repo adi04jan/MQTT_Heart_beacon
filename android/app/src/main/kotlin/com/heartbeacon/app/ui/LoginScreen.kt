@@ -18,6 +18,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -105,8 +106,6 @@ fun LoginScreen(vm: LoginVm) {
                 trailingIcon = {
                     TextButton(onClick = { vm.showPass = !vm.showPass }) { Text(if (vm.showPass) "Hide" else "Show") }
                 },
-                isError = vm.error != null,
-                supportingText = vm.error?.let { { Text(it) } },
                 modifier = Modifier.fillMaxWidth(),
             )
             AnimatedVisibility(vm.advanced) {
@@ -120,6 +119,8 @@ fun LoginScreen(vm: LoginVm) {
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+            // Not tied to one field: wrong password, no route, an untrusted certificate and "wait" all land here.
+            vm.error?.let { ErrorNote(it) }
             Button(
                 onClick = vm::submit,
                 enabled = vm.canSubmit,
@@ -128,7 +129,7 @@ fun LoginScreen(vm: LoginVm) {
                 if (vm.busy) {
                     CircularProgressIndicator(
                         strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
+                        color = LocalContentColor.current, // the disabled button's content colour, so it shows
                         modifier = Modifier.size(20.dp),
                     )
                 } else {
