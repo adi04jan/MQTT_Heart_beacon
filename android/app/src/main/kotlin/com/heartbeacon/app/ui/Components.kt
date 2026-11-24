@@ -10,8 +10,12 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -32,7 +36,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.heartbeacon.app.R
@@ -119,6 +126,20 @@ fun MoodIcon(mood: Mood, tint: Color, size: Dp = 20.dp) {
         Mood.ANNOY -> R.drawable.ic_poke
     }
     Icon(painterResource(res), contentDescription = null, tint = tint, modifier = Modifier.size(size))
+}
+
+/**
+ * A failure in place: what went wrong and what to do next, in the error role with a glyph so it does
+ * not rest on colour alone. TalkBack reads it out when it appears.
+ */
+@Composable
+fun ErrorNote(text: String, modifier: Modifier = Modifier) {
+    val c = MaterialTheme.colorScheme.error
+    Row(modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }) {
+        Icon(painterResource(R.drawable.ic_error), contentDescription = null, tint = c, modifier = Modifier.padding(top = 1.dp).size(18.dp))
+        Spacer(Modifier.width(Space.s))
+        Text(text, style = MaterialTheme.typography.bodyMedium, color = c)
+    }
 }
 
 @Composable

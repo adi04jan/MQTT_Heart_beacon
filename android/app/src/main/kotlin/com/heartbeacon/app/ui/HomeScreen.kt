@@ -2,6 +2,11 @@
 
 package com.heartbeacon.app.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +30,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -37,13 +43,20 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -54,6 +67,7 @@ import com.heartbeacon.app.data.Mark
 import com.heartbeacon.app.data.Mood
 import com.heartbeacon.app.data.Presence
 import com.heartbeacon.app.data.ServerLink
+import kotlinx.coroutines.delay
 
 class HomeVm(private val repo: HeartRepo) : ViewModel() {
     val beacon = repo.beacon
@@ -90,8 +104,8 @@ fun HomeScreen(vm: HomeVm, onBeacon: () -> Unit, onAdd: () -> Unit, onSettings: 
             ),
             modifier = Modifier.fillMaxSize().padding(bottom = pad.calculateBottomPadding()),
         ) {
+            item { ServerBanner(server) }
             item { beacon?.let { BeaconCard(it, fmt, now, onBeacon) } ?: NoBeacon(onAdd) }
-            if (server != ServerLink.CONNECTED) item { ServerNote(server) }
             item { MoodButtons(vm::send) }
             item {
                 Text(
@@ -227,14 +241,53 @@ private fun NoBeacon(onAdd: () -> Unit) {
     }
 }
 
+/**
+ * The phone's own server link, above everything it affects. Quiet on purpose: sending still works (it
+ * queues), so this informs rather than alarms. "Connecting" right after opening is normal and only shows
+ * if it lasts; the status dot is the beacon card's language.
+ */
 @Composable
-private fun ServerNote(s: ServerLink) {
-    Text(
-        if (s == ServerLink.CONNECTING) "Connecting to the server…" else "No connection. What you send goes out when it is back.",
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = Space.l),
-    )
+private fun ServerBanner(s: ServerLink) {
+    var show by remember { mutableStateOf(false) }
+    LaunchedEffect(s) {
+        when (s) {
+            ServerLink.CONNECTED -> show = false
+            ServerLink.OFFLINE -> show = true
+            ServerLink.CONNECTING -> if (!show) {
+                delay(2_500)
+                show = true
+            }
+        }
+    }
+    val cs = MaterialTheme.colorScheme
+    AnimatedVisibility(show, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = cs.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth().padding(bottom = Space.m).semantics { liveRegion = LiveRegionMode.Polite },
+        ) {
+            // Same left edges as the beacon card's status line below: indicator at 20 dp, text at 36 dp.
+            Row(Modifier.padding(horizontal = Space.screen, vertical = Space.m)) {
+                Box(Modifier.padding(top = 4.dp).size(12.dp), contentAlignment = Alignment.CenterStart) {
+                    if (s == ServerLink.OFFLINE) {
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(cs.error))
+                    } else {
+                        CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = cs.onSurfaceVariant)
+                    }
+                }
+                Spacer(Modifier.width(Space.xs))
+                Column {
+                    Text(if (s == ServerLink.OFFLINE) "No connection" else "Connecting…", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        if (s == ServerLink.OFFLINE) "What you send waits on this phone and goes out when it is back."
+                        else "What you send goes out as soon as it connects.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = cs.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable

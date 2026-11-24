@@ -261,4 +261,32 @@ class RelayTest {
             engine.serverChanged(false, 0).filterIsInstance<RelayOut.BleSend>().map { it.frames[0][0].toInt() and 0x7F }
         assertEquals(listOf(2, 3), seqs) // 0 = time, 1 = link at connect
     }
+
+    @Test fun callerChosenIdsForMoodAndRequest() {
+        engine.serverChanged(true, 0)
+        val mood = published(engine.sendMood("heart", 0, id = "00000000000000aa")).single()
+        assertEquals("00000000000000aa", mood.id) // the app shows it before the router's rcpt names it
+        engine.bleChanged(true, 0)
+        val req = toBeacon(engine.request("get", buildJsonObject { put("what", JsonPrimitive("info")) }, 0, id = "00000000000000ab")).single()
+        assertEquals("00000000000000ab", req.id)
+        val resp = beaconMsg("resp", "00000000000000ac", buildJsonObject { put("re", JsonPrimitive("00000000000000ab")); put("ok", JsonPrimitive(true)) })
+        assertEquals("resp", (framesFromBeacon(resp, 1, 0).single() as RelayOut.Local).msg.t)
+    }
+
+    @Test fun noBeaconYetMeansNoLinkAndNothingRelayed() {
+        val e = RelayEngine(null, "u1", newId = { "%016x".format(n++) })
+        val up = e.serverChanged(true, 0)
+        assertTrue(up.isEmpty()) // no `link{did, ble}` without a did
+        assertEquals(listOf("mood"), e.sendMood("heart", 0).map { Envelope.decode((it as RelayOut.Publish).payload).t })
+        val ble = e.bleChanged(true, 0)
+        assertTrue(ble.none { it is RelayOut.Publish })
+        val r = Reassembler()
+        assertEquals(listOf("time", "link"), ble.map { o -> Envelope.decode((o as RelayOut.BleSend).frames.map { r.push(it, 0) }.last().msg!!).t })
+        // Pairing: the app's own `get info` answer comes back; the beacon's own uplinks are not relayed.
+        e.request("get", JsonObject(emptyMap()), 0, id = "00000000000000b0")
+        val resp = beaconMsg("resp", "00000000000000b1", buildJsonObject { put("re", JsonPrimitive("00000000000000b0")); put("ok", JsonPrimitive(true)) })
+        assertEquals(1, Frames.split(resp, 0, 23).flatMap { e.bleFrame(it, 0) }.size)
+        val tele = beaconMsg("tele", "00000000000000b2", buildJsonObject { put("mv", JsonPrimitive(3900)) })
+        assertTrue(Frames.split(tele, 1, 23).flatMap { e.bleFrame(it, 0) }.isEmpty())
+    }
 }

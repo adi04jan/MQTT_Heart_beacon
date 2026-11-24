@@ -127,7 +127,7 @@ fun DeviceSettingsScreen(vm: DeviceSettingsVm, onBack: () -> Unit, onRemoved: ()
             item { SectionTitle("Firmware") }
             item {
                 ItemRow(
-                    "Version ${cur.fw}",
+                    if (cur.fw.isEmpty()) "Version not reported yet" else "Version ${cur.fw}",
                     cur.fwAvailable?.let { "$it is ready. Installs over Wi-Fi with at least 70% battery." } ?: "Up to date",
                     trailing = cur.fwAvailable?.let { { FilledTonalButton(onClick = {}) { Text("Update") } } },
                 )

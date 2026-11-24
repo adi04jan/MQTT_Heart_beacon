@@ -6,18 +6,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** Demonstration data so every screen renders before the server and the beacon exist. */
+/**
+ * Demonstration data for previews, tests and debug screenshots. [fail] makes login and claim answer the
+ * way [RealRepo] does for that error ([userMessage]), so error states render with the real copy.
+ */
 class FakeRepo(
     private val scope: CoroutineScope,
     presence: Presence = Presence.Near,
     loggedIn: Boolean = false,
     now: Long = System.currentTimeMillis(),
+    link: ServerLink = ServerLink.CONNECTED,
+    private val fail: Throwable? = null,
 ) : HeartRepo {
     private val min = 60_000L
     private val hour = 60 * min
 
     override val session = MutableStateFlow(if (loggedIn) Session("aditya", "203.0.113.10") else null)
-    override val server = MutableStateFlow(ServerLink.CONNECTED)
+    override val server = MutableStateFlow(link)
     override val beacon = MutableStateFlow<Beacon?>(
         Beacon("HB-3FA2C1", "Desk", presence, batteryPct = 82, lastSeenEpochMs = now - 2 * min),
     )
@@ -54,6 +59,7 @@ class FakeRepo(
 
     override suspend fun login(user: String, pass: String, host: String): String? {
         delay(600)
+        fail?.let { return userMessage(it) }
         if (pass.isEmpty()) return "Enter your password."
         session.value = Session(user.trim(), host.trim())
         return null
@@ -103,10 +109,12 @@ class FakeRepo(
         settings.update { it?.copy(wifi = it.wifi - ssid) }
     }
 
-    override suspend fun claim(did: String, name: String) {
+    override suspend fun claim(did: String, name: String): String? {
         delay(500)
+        fail?.let { return userMessage(it, did) }
         beacon.update { it?.copy(did = did, name = name) }
         settings.update { it?.copy(name = name) }
+        return null
     }
 
     override fun remove() {
