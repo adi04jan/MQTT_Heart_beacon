@@ -1,0 +1,6 @@
+#!/bin/sh
+# Admin CLI on the server, run as user hb with the server's settings. The running server picks changes up within 1 s.
+#   sudo /opt/hb/deploy/hb-admin adduser alice "Alice"            prints the new login's password once
+#   sudo /opt/hb/deploy/hb-admin register HB-3FA2C1 --assign alice
+set -eu
+exec sudo -u hb sh -c 'set -a; . /etc/hb/hb-server.env; set +a; cd /opt/hb/server; exec .venv/bin/python -m hb_server "$@"' hb-admin "$@"
