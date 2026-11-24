@@ -61,6 +61,35 @@ inline bool version_is_newer(const char *candidate, const char *current) {
   return false;
 }
 
+// Office-hours schedule: on during [start_min, stop_min) local time on days in `days` (bit n = tm_wday n, 0 = Sunday).
+struct Schedule {
+  uint8_t days;
+  uint16_t start_min, stop_min;
+};
+
+// Seconds from (wday, sec_of_day) to the next start strictly after now. 0 if no day is enabled.
+inline uint32_t seconds_to_next_start(const Schedule &s, int wday, uint32_t sec_of_day) {
+  uint32_t start = s.start_min * 60u;
+  for (int ahead = 0; ahead <= 7; ahead++) {
+    if (!(s.days >> ((wday + ahead) % 7) & 1)) continue;
+    if (ahead == 0 && sec_of_day >= start) continue;  // today's start already passed
+    return (uint32_t)ahead * 86400u + start - sec_of_day;
+  }
+  return 0;
+}
+
+// 0 while inside office hours, else seconds until they start again.
+inline uint32_t seconds_until_on(const Schedule &s, int wday, uint32_t sec_of_day) {
+  bool today = s.days >> wday & 1;
+  if (today && sec_of_day >= s.start_min * 60u && sec_of_day < s.stop_min * 60u) return 0;
+  return seconds_to_next_start(s, wday, sec_of_day);
+}
+
+// Offline retry delay after `fails` consecutive failed connects: a weak-signal miss retries in a minute instead of 15.
+inline uint32_t offline_retry_s(uint8_t fails) {
+  return fails == 0 ? 60 : fails == 1 ? 180 : 900;
+}
+
 // millis()-wraparound-safe periodic timer: true (and re-arms) once `interval` has passed since `last`.
 inline bool every(uint32_t now, uint32_t &last, uint32_t interval) {
   if (now - last < interval) return false;
