@@ -20,12 +20,18 @@ colors:
   felt-ink: "#EAE5DC"
   felt-ink-soft: "#C6C0B4"
   felt-hairline: "#3B3934"
-  stage-ground: "#101112"
-  stage-text: "#F2EEE6"
-  stage-text-soft: "#C2BBAF"
-  stage-label: "#A29B8F"
-  stage-pip-off: "#3C3934"
+  stage-ground: "#110C16"
+  stage-text: "#F4EEF3"
+  stage-text-soft: "#CABDCC"
+  stage-label: "#A898AE"
+  stage-pip-off: "#3D3145"
   stage-warn: "#F2B8B5"
+  stage-day-ground: "#D5CADB"
+  stage-day-text: "#1E1722"
+  stage-day-text-soft: "#4C4352"
+  stage-day-label: "#5D5363"
+  stage-day-pip-off: "#BFB3C6"
+  stage-day-warn: "#B3261E"
   led-heart: "#FA343C"
   led-sorry: "#EBA117"
   led-annoy: "#17E7EB"
@@ -113,7 +119,8 @@ components:
 The beacon is a heart of thin brass rods, joined by hand with blobs of tin solder, photographed on grey felt. The app
 uses those three materials and nothing else. Brass is the one accent: every control you can press, every selected
 state and the primary action. Tin, the solder's pale neutral grey, is the light ground. Felt, the charcoal cloth, is
-the dark ground and the stage the beacon stands on in both themes.
+the dark ground. The stage the beacon stands on is violet cloth, brass's complement: aubergine felt in the dark
+theme, pale lilac in the light one.
 
 The object leads. Home opens on the beacon itself, drawn from the real build: rods, soft uneven joints, battery
 block, board, LEDs and wire. Everything else is quiet Material 3 on tin or felt, with section rows gathered on
@@ -124,7 +131,7 @@ Nothing moves at rest. The stage draws a frame only while an LED effect, a gestu
 
 **Key Characteristics:**
 - One accent (brass), two grounds (tin, felt), firmware LED colours as the only saturated colour.
-- A fixed dark felt stage in both themes; the object and its light are the picture.
+- A violet stage that follows the theme (aubergine / lilac); the object and its light are the picture.
 - Jost for names, headings, figures and buttons; the system face for reading.
 - Sections on rounded plates with hairlines; no shadows.
 - The twin shows only what the desk beacon does. Unknown is shown as unknown.
@@ -145,9 +152,12 @@ Two metals and a cloth, plus the light the LEDs give.
   discs behind mood icons. **Tin ink** (#1A1917) and **soft ink** (#55524B): text. **Hairline** (#D3D1CB).
 - **Felt** (#131211): the dark ground. **Felt plate** (#1E1D1A), **felt high** (#34322E), **felt ink** (#EAE5DC),
   **soft ink** (#C6C0B4), **hairline** (#3B3934).
-- **Stage** (#101112 under a procedural lamp pool that lifts to a cool charcoal, about #3A3C3E, with visible grain,
-  darkened again behind the name and the foot): text #F2EEE6, soft
-  text #C2BBAF, labels #A29B8F, unlit pips #3C3934, warnings #F2B8B5.
+- **Stage, dark** (aubergine felt: #110C16 under a procedural lamp pool that lifts to about #3F2D52, with visible
+  grain, darkened again behind the name and the foot): text #F4EEF3, soft text #CABDCC, labels #A898AE, unlit pips
+  #3D3145, warnings #F2B8B5.
+- **Stage, light** (lilac cloth: #D5CADB lifting to about #F6EBFD under the pool, finer grain): text #1E1722, soft
+  text #4C4352, labels #5D5363, unlit pips #BFB3C6, warnings #B3261E; mood marks use the on-tin mood colours. The
+  cage's far side fades into the cloth instead of darkening, and LED light is laid over the cloth instead of added.
 
 ### LED colours (data, not decoration)
 - **Heart** 250,0,0 (drawn #FA343C as a mark on the stage, #C81E2B on tin), **Sorry** 235,161,23 (#B85C00 on tin, kept apart from brass),
@@ -253,7 +263,7 @@ as large tappable values, and seven round day toggles.
 ### Do:
 - **Do** keep brass for things that can be pressed or are selected.
 - **Do** take every LED colour and timing from `Fx`; show stale or missing values as stale or unknown.
-- **Do** keep the stage on dark felt in both themes, and draw frames only while something is happening.
+- **Do** keep the stage on violet cloth that follows the theme, and draw frames only while something is happening.
 - **Do** group a section's rows on one plate with hairlines, heading above in Jost.
 - **Do** keep joints on the cage rounded and uneven, rods thin, highlights wide and soft.
 

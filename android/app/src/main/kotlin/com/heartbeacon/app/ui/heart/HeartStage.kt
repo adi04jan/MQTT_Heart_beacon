@@ -43,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -62,6 +63,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -98,41 +100,69 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.hypot
 
-/** The stage is the grey cloth the beacon sits on, lit from above, in both themes: the object and its light are the colour. */
+/**
+ * The cloth the beacon sits on, following the theme: aubergine felt under a lamp in the dark, pale lilac cloth by
+ * daylight in the light. Violet is brass's complement, so the cage stands off it; the LEDs stay the only bright colour.
+ */
 object Stage {
-    val ground = Color(0xFF101112)
-    val text = Color(0xFFF2EEE6)
-    val text2 = Color(0xFFC2BBAF)
-    val label = Color(0xFFA29B8F)
-    val pipOff = Color(0xFF3C3934)
-    val warn = Color(0xFFF2B8B5)
-    val brass = Color(0xFFE2BC6A)
-    val onBrass = Color(0xFF2E2100)
+    val light: Boolean @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.surface.luminance() > 0.5f
+    private fun pick(light: Boolean, day: Long, night: Long) = Color(if (light) day else night)
+
+    /** The cloth at its edge, away from the light (the felt shader's `lo` times its tint). */
+    val ground @Composable @ReadOnlyComposable get() = pick(light, 0xFFD5CADB, 0xFF110C16)
+    /** What sits behind figures that cross the rods: a shade on felt, a veil of light on the pale cloth. */
+    val veil @Composable @ReadOnlyComposable get() = pick(light, 0xFFF8F2FA, 0xFF07050A)
+    val text @Composable @ReadOnlyComposable get() = pick(light, 0xFF1E1722, 0xFFF4EEF3)
+    val text2 @Composable @ReadOnlyComposable get() = pick(light, 0xFF4C4352, 0xFFCABDCC)
+    val label @Composable @ReadOnlyComposable get() = pick(light, 0xFF5D5363, 0xFFA898AE)
+    val pipOff @Composable @ReadOnlyComposable get() = pick(light, 0xFFBFB3C6, 0xFF3D3145)
+    val warn @Composable @ReadOnlyComposable get() = pick(light, 0xFFB3261E, 0xFFF2B8B5)
+    val brass @Composable @ReadOnlyComposable get() = pick(light, 0xFFB98E2B, 0xFFE2BC6A)
+    val onBrass @Composable @ReadOnlyComposable get() = pick(light, 0xFF231700, 0xFF2E2100)
 }
 
 private const val REST_YAW = -0.26f
 private const val REST_PITCH = 0.06f
 
-// Felt under a soft overhead lamp: a pool of light where the beacon stands, the cloth's grain, dark beyond.
+// Cloth under a soft overhead light: a pool where the beacon stands, the cloth's grain, falling off beyond.
 private const val FELT = """
 uniform float2 spot;
 uniform float reach;
+uniform float lo;
+uniform float hi;
+uniform float grain;
+uniform float3 tint;
 half4 main(float2 p) {
     float2 d = (p - spot) / reach;
     float pool = exp(-dot(d, d) * 1.45);
     float n = fract(sin(dot(floor(p / 2.0), float2(12.9898, 78.233))) * 43758.5453);
     float m = fract(sin(dot(floor(p / float2(9.0, 3.0)), float2(39.346, 11.135))) * 24634.6345);
-    float v = mix(0.062, 0.235, pool);
-    v += (n - 0.5) * 0.050 * (0.35 + pool) + (m - 0.5) * 0.026 * (0.2 + pool);
-    return half4(v * 0.975, v * 0.99, v * 1.03, 1.0);
+    float v = mix(lo, hi, pool);
+    v += grain * ((n - 0.5) * 0.050 * (0.35 + pool) + (m - 0.5) * 0.026 * (0.2 + pool));
+    return half4(v * tint.r, v * tint.g, v * tint.b, 1.0);
 }
 """
 
-/** The cloth ground, its light pooled at ([x], [y]) as fractions of the size, reaching [reach] widths out. */
-fun Modifier.felt(x: Float, y: Float, reach: Float = 0.78f): Modifier = drawWithCache {
+/**
+ * The cloth ground, its light pooled at ([x], [y]) as fractions of the size, reaching [reach] widths out: dark
+ * felt, or the pale daylight cloth when [light].
+ */
+fun Modifier.felt(x: Float, y: Float, reach: Float = 0.78f, light: Boolean = false): Modifier = drawWithCache {
     val shader = RuntimeShader(FELT)
     shader.setFloatUniform("spot", size.width * x, size.height * y)
     shader.setFloatUniform("reach", size.width * reach)
+    // Keep Stage.ground at lo * tint.
+    if (light) {
+        shader.setFloatUniform("lo", 0.835f)
+        shader.setFloatUniform("hi", 0.965f)
+        shader.setFloatUniform("grain", 0.55f)
+        shader.setFloatUniform("tint", 1f, 0.95f, 1.03f)
+    } else {
+        shader.setFloatUniform("lo", 0.066f)
+        shader.setFloatUniform("hi", 0.245f)
+        shader.setFloatUniform("grain", 1f)
+        shader.setFloatUniform("tint", 1.02f, 0.74f, 1.32f)
+    }
     val brush = ShaderBrush(shader)
     onDrawBehind { drawRect(brush) }
 }
@@ -260,14 +290,16 @@ fun HeartStage(
 
     val rgb = remember { IntArray(27) }
     val stateText = beacon?.let { describe(it, fmt) } ?: "No beacon yet"
+    val light = Stage.light
+    val ground = Stage.ground
 
     Box(
         modifier
-            .background(Stage.ground)
-            .felt(0.60f, 0.50f)
-            // Top and foot stay dark enough for the name and the last event to read on the lit cloth.
+            .background(ground)
+            .felt(0.60f, 0.50f, light = light)
+            // Top and foot fall back to the cloth's edge, so the name and the last event read off the lit pool.
             .drawBehind {
-                drawRect(Brush.verticalGradient(0f to Color(0f, 0f, 0f, 0.5f), 0.2f to Color.Transparent, 0.68f to Color.Transparent, 1f to Color(0f, 0f, 0f, 0.62f)))
+                drawRect(Brush.verticalGradient(0f to ground.copy(alpha = 0.5f), 0.2f to Color.Transparent, 0.68f to Color.Transparent, 1f to ground.copy(alpha = 0.62f)))
             }
             .semantics {
                 contentDescription = "Your beacon, ${stateText.lowercase()}"
@@ -347,7 +379,8 @@ fun HeartStage(
                     val k = 0.62f + 0.38f * bright.coerceIn(5, 100) / 100f
                     for (i in rgb.indices) rgb[i] = (rgb[i] * k).toInt()
                     with(renderer) {
-                        if (wave.value in 0.001f..0.999f) wave(wave.value, moodColor(waveMood), yaw.value, pitch.value, center, halfWidth)
+                        paper = light
+                        if (wave.value in 0.001f..0.999f) wave(wave.value, moodColor(waveMood, onLight = light), yaw.value, pitch.value, center, halfWidth)
                         draw(rgb, yaw.value, pitch.value, squash.value, look, center, halfWidth)
                     }
                 }
@@ -394,10 +427,14 @@ fun BeaconFigure(play: Fx.Kind?, modifier: Modifier = Modifier, fit: Float = 0.3
         val t0 = SystemClock.uptimeMillis()
         while (true) withFrameMillis { clock = SystemClock.uptimeMillis() - t0 }
     }
-    Canvas(modifier.background(Stage.ground).felt(0.5f, at + 0.04f, 0.7f).clearAndSetSemantics {}) {
+    val light = Stage.light
+    Canvas(modifier.background(Stage.ground).felt(0.5f, at + 0.04f, 0.7f, light).clearAndSetSemantics {}) {
         if (play != null) Fx.frame(play, 0, clock, 100, rgb) else rgb.fill(0)
         val hw = minOf(size.width * 0.34f, size.height * fit)
-        with(renderer) { draw(rgb, yaw.value, REST_PITCH, 1f, Look.AWAKE, Offset(size.width / 2, size.height * at), hw) }
+        with(renderer) {
+            paper = light
+            draw(rgb, yaw.value, REST_PITCH, 1f, Look.AWAKE, Offset(size.width / 2, size.height * at), hw)
+        }
     }
 }
 
@@ -415,10 +452,11 @@ private val Reading = TextStyle(fontFamily = Jost, fontWeight = FontWeight.Norma
 private fun Dashboard(b: Beacon, fmt: Format, modifier: Modifier) {
     val now = System.currentTimeMillis()
     val offline = b.presence == Presence.Offline
+    val veil = Stage.veil
     Column(
         modifier
             .width(164.dp)
-            // A soft shadow on the cloth behind the figures, so they read where rods pass under them.
+            // A soft veil on the cloth behind the figures, so they read where rods pass under them.
             .drawBehind {
                 // An ellipse that fades out all round: no edge anywhere on the cloth.
                 val rx = size.width * 1.3f
@@ -426,7 +464,7 @@ private fun Dashboard(b: Beacon, fmt: Format, modifier: Modifier) {
                 scale(1f, size.height * 0.66f / rx, pivot = mid) {
                     drawCircle(
                         Brush.radialGradient(
-                            0f to Color(0f, 0f, 0f, 0.74f), 0.5f to Color(0f, 0f, 0f, 0.5f), 1f to Color.Transparent,
+                            0f to veil.copy(alpha = 0.74f), 0.5f to veil.copy(alpha = 0.5f), 1f to Color.Transparent,
                             center = mid, radius = rx,
                         ),
                         radius = rx, center = mid,
@@ -539,17 +577,18 @@ private fun Foot(
     modifier: Modifier,
 ) {
     val now = System.currentTimeMillis()
+    val light = Stage.light
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val line: Pair<String, Color?> = when {
-            tapCount > 0 -> "${label(moodOf(tapCount))}…" to moodColor(moodOf(tapCount))
-            sent != null -> "${label(sent)} sent" to moodColor(sent)
+            tapCount > 0 -> "${label(moodOf(tapCount))}…" to moodColor(moodOf(tapCount), light)
+            sent != null -> "${label(sent)} sent" to moodColor(sent, light)
             beacon == null -> "No beacon yet. A tap still sends a Heart." to null
             server == ServerLink.OFFLINE -> "This phone is offline. Moods wait and go out after." to null
             server == ServerLink.CONNECTING -> "Connecting. Moods wait and go out after." to null
             waiting > 0 -> "$waiting waiting. They play when it wakes." to null
             else -> events.firstOrNull()?.let { e ->
                 val mark = e.mark?.let { " · ${fmt.mark(it)}" }.orEmpty()
-                "${fmt.event(e.mood, e.from)} · ${fmt.ago(e.atEpochMs, now)}$mark" to (if (e.mark == Mark.SHOWN || e.from != null) moodColor(e.mood) else null)
+                "${fmt.event(e.mood, e.from)} · ${fmt.ago(e.atEpochMs, now)}$mark" to (if (e.mark == Mark.SHOWN || e.from != null) moodColor(e.mood, light) else null)
             } ?: ("Nothing yet" to null)
         }
         AnimatedContent(
@@ -592,7 +631,7 @@ private fun GestureKey(tapCount: Int) {
         for (m in Mood.entries) {
             val n = m.ordinal + 1
             val on by animateFloatAsState(if (tapCount == n) 1f else 0f, tween(140), label = "key")
-            val c = lerp(Stage.label, moodColor(m), on)
+            val c = lerp(Stage.label, moodColor(m, Stage.light), on)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 repeat(n) {
                     Box(Modifier.padding(end = 3.dp).size(6.dp).clip(CircleShape).background(c))

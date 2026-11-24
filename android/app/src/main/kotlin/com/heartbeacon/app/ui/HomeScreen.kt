@@ -49,7 +49,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -93,8 +92,8 @@ fun HomeScreen(vm: HomeVm, onAdd: () -> Unit, onSettings: () -> Unit) {
         val stagePx = with(LocalDensity.current) { stageHeight.toPx() }
         val pinned by remember { derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > stagePx * 0.82f } }
 
-        // Light status icons over the dark stage; the theme's own once the pinned bar covers it.
-        StatusBarIcons(dark = pinned && cs.surface.luminance() > 0.5f)
+        // The stage follows the theme, so the theme's icons suit it and the pinned bar alike.
+        SurfaceStatusBar()
 
         LazyColumn(
             state = list,

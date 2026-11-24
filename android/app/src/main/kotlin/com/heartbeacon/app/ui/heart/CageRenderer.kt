@@ -171,7 +171,8 @@ class CageRenderer {
         total /= 9f // 0..3
 
         cyw = cos(yaw); syw = sin(yaw); cp = cos(pitch); sp = sin(pitch); sq = squash
-        dim = when (look) { Look.AWAKE -> 1f; Look.ASLEEP -> 0.5f; Look.OFFLINE -> 0.44f }
+        // On the pale cloth a dimmed beacon would go dark brown; it pales instead, through the fade.
+        dim = when (look) { Look.AWAKE -> 1f; Look.ASLEEP -> if (paper) 0.8f else 0.5f; Look.OFFLINE -> if (paper) 0.8f else 0.44f }
         sat = if (look == Look.OFFLINE) 0.12f else 1f
         alpha = if (look == Look.OFFLINE) 0.58f else 1f
         cool = look == Look.ASLEEP
@@ -186,7 +187,7 @@ class CageRenderer {
             ss[i] = p
             // Tin: grey, a little warm, lit from the upper left; the LEDs colour it.
             // The far joints fall back harder than the rods, so they do not read as a second layer.
-            val depth = fog(tz).let { it * (0.5f + 0.5f * it) }
+            val depth = shadeOf(fog(tz).let { it * (0.5f + 0.5f * it) })
             var c = SOLDER * depth * dim
             var cr = c; var cg = c * 0.985f; var cb = c * 0.95f
             for (l in 0 until 9) {
@@ -225,9 +226,10 @@ class CageRenderer {
         }
         if (total > 0.01f) {
             val mean = ledMean()
-            glow(cx0, floorY, hw * 1.25f, hw * 0.21f, mean, (0.42f * total).coerceAtMost(0.6f) * dim)
-            // Bloom in the air around the cage.
-            glow(cx0, cy0, hw * 1.7f, hw * 1.7f, mean, (0.20f * total).coerceAtMost(0.32f) * dim)
+            val k = if (paper) 0.6f else 1f
+            glow(cx0, floorY, hw * 1.3f, hw * 0.24f, mean, (0.5f * total).coerceAtMost(0.7f) * dim * k)
+            // Bloom in the air around the cage, the LEDs' colour filling the case.
+            glow(cx0, cy0, hw * 1.8f, hw * 1.8f, mean, (0.30f * total).coerceAtMost(0.45f) * dim * k)
         }
 
         // Sort everything back to front: key = quantised depth << 16 | item.
@@ -250,6 +252,7 @@ class CageRenderer {
         val rodW = ROD * hw
         for (o in order) {
             val item = o and 0xFFFF
+            fade = 1f
             when {
                 item < r -> rod(item, rodW)
                 item < r + n -> node(item - r, rodW)
@@ -261,6 +264,7 @@ class CageRenderer {
                 else -> wire(item - r - n - Q - 1, rodW)
             }
         }
+        fade = 1f
     }
 
     /**
@@ -283,18 +287,30 @@ class CageRenderer {
             }
             path.close()
             val a = (1f - u) * (1f - u) * if (ring == 0) 1f else 0.6f
-            drawPath(path, color.copy(alpha = a * 0.5f), style = Stroke(width = halfWidth * 0.05f * (1f - 0.6f * u)), blendMode = BlendMode.Plus)
-            drawPath(path, color.copy(alpha = a), style = Stroke(width = halfWidth * 0.012f * (1f - 0.5f * u) + 1f), blendMode = BlendMode.Plus)
+            drawPath(path, color.copy(alpha = a * 0.5f), style = Stroke(width = halfWidth * 0.05f * (1f - 0.6f * u)), blendMode = lightBlend)
+            drawPath(path, color.copy(alpha = a), style = Stroke(width = halfWidth * 0.012f * (1f - 0.5f * u) + 1f), blendMode = lightBlend)
         }
     }
 
-    private var dim = 1f; private var sat = 1f; private var alpha = 1f; private var cool = false
+    /**
+     * True on the pale daylight cloth: the far side fades into the cloth instead of sinking into the dark, and light
+     * is laid over it instead of added (adding to a light ground only bleaches it).
+     */
+    var paper = false
+
+    private val lightBlend get() = if (paper) BlendMode.SrcOver else BlendMode.Plus
+
+    private var dim = 1f; private var sat = 1f; private var alpha = 1f; private var cool = false; private var fade = 1f
     private var hw = 1f; private var cx0 = 0f; private var cy0 = 0f
 
     private fun key(z: Float, item: Int) = (((z + 3f) * 5000f).toInt().coerceIn(0, 32767) shl 16) or item
 
     // Nearer is brighter and fuller; the far side of the cage sinks into the dark.
     private fun fog(z: Float) = 0.26f + 0.74f * smooth((z + 0.62f) / 1.2f)
+
+    // How much of the fog darkens: all of it on felt; on the pale cloth only a little, the rest goes to [fadeOf].
+    private fun shadeOf(f: Float) = if (paper) 0.74f + 0.26f * f else f
+    private fun fadeOf(f: Float) = if (paper) 0.3f + 0.7f * f else 1f
 
     private fun DrawScope.rod(i: Int, w: Float) {
         val a = Cage.rods[2 * i]; val b = Cage.rods[2 * i + 1]
@@ -309,7 +325,9 @@ class CageRenderer {
         val spec = max(0f, 1f - th * th).pow(11)
         val fill = sqrt(max(0f, 1f - tf * tf))
         val zm = (vz[a] + vz[b]) / 2
-        val depth = fog(zm)
+        val far = fog(zm)
+        val depth = shadeOf(far)
+        fade = fadeOf(far)
         val tone = rodTone[i]
         val k = (0.13f + 0.50f * diff + 0.10f * fill) * depth * dim * tone
         val s = spec * 0.46f * depth * dim
@@ -322,7 +340,7 @@ class CageRenderer {
         }
         val ax = sx[a]; val ay = sy[a]; val bx = sx[b]; val by = sy[b]
         val width = w * (ss[a] + ss[b]) / 2
-        if (depth < 0.52f) {
+        if (far < 0.52f) {
             drawLine(color(cr * 0.82f, cg * 0.82f, cb * 0.82f), Offset(ax, ay), Offset(bx, by), strokeWidth = width * 0.9f, cap = StrokeCap.Round)
             return
         }
@@ -339,6 +357,7 @@ class CageRenderer {
     private fun DrawScope.node(i: Int, w: Float) {
         val rad = w * 1.42f * nodeSize[i] * ss[i]
         val x = sx[i]; val y = sy[i]
+        fade = fadeOf(fog(vz[i]).let { it * (0.5f + 0.5f * it) })
         val cr = nr[i]; val cg = ng[i]; val cb = nb[i]
         withTransform({ translate(x, y); scale(rad, rad, Offset.Zero) }) {
             drawCircle(dome, 1f, Offset.Zero, colorFilter = ColorFilter.tint(color(cr * 1.22f, cg * 1.22f, cb * 1.22f), BlendMode.Modulate))
@@ -454,7 +473,8 @@ class CageRenderer {
 
     // Enamelled copper, one hair thick.
     private fun DrawScope.wire(w: Int, rodW: Float) {
-        val d = fog(wz[w]) * dim
+        val d = shadeOf(fog(wz[w])) * dim
+        fade = fadeOf(fog(wz[w]))
         path.reset()
         path.moveTo(wsx[w * 3], wsy[w * 3])
         path.quadraticTo(wsx[w * 3 + 1], wsy[w * 3 + 1], wsx[w * 3 + 2], wsy[w * 3 + 2])
@@ -472,7 +492,7 @@ class CageRenderer {
         val p = persp(quadDepth(q))
         trace(q)
         if (front) {
-            drawPath(path, color(0.84f * dim + r0 * 0.5f, 0.83f * dim + g0 * 0.5f, 0.79f * dim + b0 * 0.5f))
+            drawPath(path, color(0.84f * dim + r0 * 0.35f, 0.83f * dim + g0 * 0.35f, 0.79f * dim + b0 * 0.35f))
             // Lens: an ellipse on the package's own axes, so it foreshortens with it.
             val ux = (qsx[o + 3] - qsx[o]) * 0.36f; val uy = (qsy[o + 3] - qsy[o]) * 0.36f
             val wx = (qsx[o + 1] - qsx[o]) * 0.36f; val wy = (qsy[o + 1] - qsy[o]) * 0.36f
@@ -483,23 +503,31 @@ class CageRenderer {
                 if (k == 0) path.moveTo(px, py) else path.lineTo(px, py)
             }
             path.close()
+            // Lit, the lens is the LED's own colour, not white: the phosphor's yellow gives way to it.
             val off = 1f - on
-            drawPath(path, color(0.69f * dim * off + r0 + on * 0.5f, 0.66f * dim * off + g0 + on * 0.5f, 0.55f * dim * off + b0 + on * 0.5f))
+            drawPath(path, color(0.69f * dim * off + r0, 0.66f * dim * off + g0, 0.55f * dim * off + b0))
         } else {
             drawPath(path, color(0.10f * dim, 0.11f * dim, 0.10f * dim))
         }
         if (on > 0.004f) {
             val vis = if (front) 1f else 0.4f
-            val c = Color(r0.coerceAtMost(1f), g0.coerceAtMost(1f), b0.coerceAtMost(1f))
-            val rad = hw * p * (0.26f + 0.34f * on)
-            glow(x, y, rad, rad, c, (0.9f * on * vis * dim).coerceAtMost(1f))
-            if (front) glow(x, y, hw * p * 0.11f, hw * p * 0.11f, Color.White, (0.95f * on * dim).coerceAtMost(1f))
+            // The hue at full strength; how bright it is goes into the alpha.
+            val c = Color((r0 / on).coerceAtMost(1f), (g0 / on).coerceAtMost(1f), (b0 / on).coerceAtMost(1f))
+            val wide = hw * p * (0.30f + 0.46f * on)
+            glow(x, y, wide, wide, c, (0.8f * on * vis * dim).coerceAtMost(1f))
+            val tight = hw * p * 0.15f
+            glow(x, y, tight, tight, c, (on * vis * dim).coerceAtMost(1f))
+            // A hot point, the colour washed toward white, as a lit LED reads to the eye.
+            if (front) {
+                val hot = Color(0.55f + 0.45f * c.red, 0.55f + 0.45f * c.green, 0.55f + 0.45f * c.blue)
+                glow(x, y, hw * p * 0.06f, hw * p * 0.06f, hot, (0.9f * on * dim).coerceAtMost(1f))
+            }
         }
     }
 
     private fun DrawScope.glow(x: Float, y: Float, rx: Float, ry: Float, c: Color, a: Float) {
         withTransform({ translate(x, y); scale(rx, ry, Offset.Zero) }) {
-            drawCircle(glow, 1f, Offset.Zero, alpha = a * alpha, colorFilter = ColorFilter.tint(tint(c), BlendMode.Modulate), blendMode = BlendMode.Plus)
+            drawCircle(glow, 1f, Offset.Zero, alpha = a * alpha, colorFilter = ColorFilter.tint(tint(c), BlendMode.Modulate), blendMode = lightBlend)
         }
     }
 
@@ -520,7 +548,7 @@ class CageRenderer {
             (lum + (cr - lum) * sat).coerceIn(0f, 1f),
             (lum + (cg - lum) * sat).coerceIn(0f, 1f),
             (lum + (cb - lum) * sat).coerceIn(0f, 1f),
-            if (solid) 1f else a * alpha,
+            if (solid) 1f else a * alpha * fade,
         )
     }
 

@@ -71,7 +71,7 @@ class LoginVm(private val repo: HeartRepo) : ViewModel() {
 
 @Composable
 fun LoginScreen(vm: LoginVm) {
-    StatusBarIcons(dark = false)
+    SurfaceStatusBar()
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
       Column(Modifier.imePadding().verticalScroll(rememberScrollState())) {
         // The beacon itself, unlit on its cloth, with the app's name set over the foot of the stage.
