@@ -469,6 +469,7 @@ class Glue:
         self.db, self.host, self.port, self.clock, self.loader = db, host, port, clock, loader
         self.lock = threading.RLock()
         self.state = load_state(db, int(clock()))
+        self.seen = self._data_version()
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="router", protocol=mqtt.MQTTv5)
         self.client.username_pw_set("router", password)
         self.client.on_connect = self._on_connect
@@ -482,7 +483,18 @@ class Glue:
     def _ticker(self) -> None:
         while True:
             time.sleep(1)
-            self.handle(Tick(int(self.clock())))
+            self.poll()
+
+    def _data_version(self) -> int:
+        return self.db.one("PRAGMA data_version")[0]  # changes when another connection commits
+
+    def poll(self) -> None:
+        """One tick. First picks up users and claims written by another process (the admin CLI)."""
+        v = self._data_version()
+        if v != self.seen:
+            self.seen = v
+            self.refresh()
+        self.handle(Tick(int(self.clock())))
 
     def _on_connect(self, client, userdata, flags, reason, props) -> None:
         if reason.is_failure:

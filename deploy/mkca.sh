@@ -15,14 +15,17 @@ cd "$out"
 
 if [ ! -f ca.key ]; then
   openssl ecparam -name prime256v1 -genkey -noout -out ca.key
-  openssl req -x509 -new -key ca.key -sha256 -days 7300 -subj "/CN=Heart Beacon Root CA" \
-    -addext "basicConstraints=critical,CA:TRUE,pathlen:0" -addext "keyUsage=critical,keyCertSign,cRLSign" \
-    -out ca.crt
+  # Own config, not -addext: OpenSSL 1.1.1 (Ubuntu 20.04) keeps the system config's v3_ca basicConstraints
+  # beside an -addext one, and a CA with that extension twice verifies nothing.
+  printf '[req]\ndistinguished_name=dn\nx509_extensions=ca\n[dn]\n[ca]\nbasicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\n' \
+    > ca.cnf
+  openssl req -x509 -new -key ca.key -sha256 -days 7300 -subj "/CN=Heart Beacon Root CA" -config ca.cnf -out ca.crt
+  rm -f ca.cnf
 fi
 
 openssl ecparam -name prime256v1 -genkey -noout -out leaf.key
 openssl req -new -key leaf.key -subj "/CN=$ip" -out leaf.csr
-printf 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=IP:%s\n' \
+printf 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=IP:%s\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid\n' \
   "$ip" > leaf.ext
 openssl x509 -req -in leaf.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 825 -sha256 -extfile leaf.ext \
   -out leaf.crt
@@ -32,5 +35,5 @@ rm -f leaf.csr leaf.ext
 openssl ec -in cfg-sign.key -pubout -out cfg-sign.pub 2>/dev/null
 chmod 644 ca.crt leaf.crt cfg-sign.pub
 
-openssl verify -CAfile ca.crt leaf.crt
+openssl verify -x509_strict -CAfile ca.crt leaf.crt # strict: what Python >= 3.13 checks by default
 openssl x509 -in leaf.crt -noout -ext subjectAltName

@@ -1,5 +1,10 @@
-"""deploy/acl (the shipped file) under Mosquitto 1.6 ACL semantics, then against a real 1.6.9 broker in Docker."""
+"""deploy/acl (the shipped file) under Mosquitto 1.6 ACL semantics, then against a real 1.6 broker: a local binary
+(Ubuntu 20.04's apt mosquitto is 1.6.9, e.g. in WSL via deploy/e2e-local.sh) or eclipse-mosquitto:1.6.9 in Docker."""
+import contextlib
+import os
 import re
+import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -99,56 +104,91 @@ def _docker_up() -> bool:
         return False
 
 
-@pytest.mark.skipif(not _docker_up(), reason="Docker is not running: real-broker ACL test needs eclipse-mosquitto:1.6.9")
-def test_real_mosquitto_1_6_9_keeps_beacons_apart(tmp_path):
+def _local_mosquitto() -> str | None:
+    exe = shutil.which("mosquitto", path=os.environ.get("PATH", "") + os.pathsep + "/usr/sbin")
+    if exe is None:
+        return None
+    banner = subprocess.run([exe, "-h"], capture_output=True, text=True).stdout
+    return exe if banner.startswith("mosquitto version 1.6") else None
+
+
+@contextlib.contextmanager
+def real_broker(d: Path):
+    """Mosquitto 1.6 on 127.0.0.1 with d/passwd and d/acl; yields its port."""
+    conf = "allow_anonymous false\npassword_file {0}/passwd\nacl_file {0}/acl\nlistener {1}\n"
+    exe = _local_mosquitto()
+    if exe:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        (d / "mosquitto.conf").write_text(conf.format(d, f"{port} 127.0.0.1"), newline="\n")
+        p = subprocess.Popen([exe, "-c", str(d / "mosquitto.conf")], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        try:
+            yield port
+        finally:
+            p.terminate()  # Ubuntu's 1.6.9 links libdlt and takes ~10 s to exit on SIGTERM
+            try:
+                p.wait(15)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait()
+        return
+    if not _docker_up():
+        pytest.skip("no local Mosquitto 1.6 and Docker is not running: real-broker ACL test needs one "
+                    "(deploy/e2e-local.sh runs it in WSL)")
+    (d / "mosquitto.conf").write_text(conf.format("/mosquitto/config", 1883), newline="\n")
+    cid = subprocess.run(["docker", "run", "-d", "--rm", "-p", "127.0.0.1::1883", "-v",
+                          f"{d}:/mosquitto/config", "eclipse-mosquitto:1.6.9"],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    try:
+        yield int(subprocess.run(["docker", "port", cid, "1883"], capture_output=True, text=True,
+                                 check=True).stdout.split(":")[-1])
+    finally:
+        subprocess.run(["docker", "rm", "-f", cid], capture_output=True)
+
+
+def test_real_mosquitto_1_6_keeps_beacons_apart(tmp_path):
     import paho.mqtt.client as mqtt
 
     pw = {u: auth.new_secret() for u in ("router", A, B, "alice")}
     auth.write_passwd(tmp_path / "passwd", [(u, auth.mosq_hash(p)) for u, p in pw.items()])
     (tmp_path / "acl").write_bytes(ACL.read_bytes())
-    (tmp_path / "mosquitto.conf").write_text(
-        "allow_anonymous false\npassword_file /mosquitto/config/passwd\nacl_file /mosquitto/config/acl\n"
-        "listener 1883\n", newline="\n")
-    cid = subprocess.run(["docker", "run", "-d", "--rm", "-p", "127.0.0.1::1883", "-v",
-                          f"{tmp_path}:/mosquitto/config", "eclipse-mosquitto:1.6.9"],
-                         capture_output=True, text=True, check=True).stdout.strip()
     clients = []
-    try:
-        port = int(subprocess.run(["docker", "port", cid, "1883"], capture_output=True, text=True,
-                                  check=True).stdout.split(":")[-1])
-        got = {u: [] for u in pw}
+    with real_broker(tmp_path) as port:
+        try:
+            got = {u: [] for u in pw}
 
-        def connect(user):
-            c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"t-{user}", protocol=mqtt.MQTTv5)
-            c.username_pw_set(user, pw[user])
-            c.on_message = lambda cl, ud, m: got[user].append(m.topic)
-            for _ in range(50):  # broker start-up
-                try:
-                    c.connect("127.0.0.1", port)
-                    break
-                except OSError:
-                    time.sleep(0.2)
-            c.loop_start()
-            clients.append(c)
-            return c
+            def connect(user):
+                c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"t-{user}", protocol=mqtt.MQTTv5)
+                c.username_pw_set(user, pw[user])
+                c.on_message = lambda cl, ud, m: got[user].append(m.topic)
+                for _ in range(50):  # broker start-up
+                    try:
+                        c.connect("127.0.0.1", port)
+                        break
+                    except OSError:
+                        time.sleep(0.2)
+                c.loop_start()
+                clients.append(c)
+                return c
 
-        r, a = connect("router"), connect(A)
-        connect(B)
-        r.subscribe("hb/v1/#", qos=1)
-        a.subscribe([("hb/v1/#", 1), (f"hb/v1/d/{B}/#", 1), (f"hb/v1/d/{A}/down", 1)])
-        time.sleep(1)
-        for t in (f"hb/v1/d/{B}/down", f"hb/v1/d/{B}/cfg", "hb/v1/u/alice/down", f"hb/v1/d/{A}/down"):
-            r.publish(t, b"x", qos=1)
-        a.publish(f"hb/v1/d/{B}/up", b"spoof", qos=1)
-        a.publish(f"hb/v1/d/{A}/up", b"mine", qos=1)
-        deadline = time.time() + 5
-        while time.time() < deadline and (f"hb/v1/d/{A}/up" not in got["router"]):
-            time.sleep(0.1)
-        time.sleep(0.5)
-        assert sorted(set(got[A])) == [f"hb/v1/d/{A}/down"]  # nothing of B's, nothing of the phone's
-        assert f"hb/v1/d/{A}/up" in got["router"] and f"hb/v1/d/{B}/up" not in got["router"]  # no spoofing B
-    finally:
-        for c in clients:
-            c.loop_stop()
-            c.disconnect()
-        subprocess.run(["docker", "rm", "-f", cid], capture_output=True)
+            r, a = connect("router"), connect(A)
+            connect(B)
+            r.subscribe("hb/v1/#", qos=1)
+            a.subscribe([("hb/v1/#", 1), (f"hb/v1/d/{B}/#", 1), (f"hb/v1/d/{A}/down", 1)])
+            time.sleep(1)
+            for t in (f"hb/v1/d/{B}/down", f"hb/v1/d/{B}/cfg", "hb/v1/u/alice/down", f"hb/v1/d/{A}/down"):
+                r.publish(t, b"x", qos=1)
+            a.publish(f"hb/v1/d/{B}/up", b"spoof", qos=1)
+            a.publish(f"hb/v1/d/{A}/up", b"mine", qos=1)
+            deadline = time.time() + 5
+            while time.time() < deadline and (f"hb/v1/d/{A}/up" not in got["router"]):
+                time.sleep(0.1)
+            time.sleep(0.5)
+            assert sorted(set(got[A])) == [f"hb/v1/d/{A}/down"]  # nothing of B's, nothing of the phone's
+            assert f"hb/v1/d/{A}/up" in got["router"] and f"hb/v1/d/{B}/up" not in got["router"]  # no spoofing B
+        finally:
+            for c in clients:
+                c.loop_stop()
+                c.disconnect()
