@@ -77,14 +77,15 @@ Tick a box only after its bench check passed.
 - [x] Private CA + leaf cert with IP SAN (`deploy/mkca.sh`, chain + TLS handshake checked locally); separate Mosquitto 1.6.9 instance, password_file + pattern ACL (replaces dynsec)
 - [x] FastAPI + SQLite: device registry, claim (admin-assigned owner only), signed JSON config, router (queue, dedupe, receipts, coalesce) - 177 tests
 - [x] Minimal admin (devices, users, register/assign, config edit) on 127.0.0.1; `backup.sh` restore checked in WSL (age branch untested)
-- [ ] Real-broker ACL test (skipped: Docker not running)
-- [ ] Deploy (needs user: public IP, port forwards 8883/8443, Python >= 3.11 via uv, `age`, beacon dids)
-- [ ] Bench: TLS fails without CA; two simulators exchange a heart over the public IP
+- [x] Real-broker ACL test: runs in WSL against apt Mosquitto 1.6.9 (`deploy/e2e-local.sh`), 2026-11-24
+- [x] Deploy kit: `install.sh` (dry run by default, `--apply`, refuses to touch the shared broker, no root writes in hb-owned dirs), `uninstall.sh`, `hb-admin`, `RUNBOOK.md`; local e2e `smoke.py` SMOKE PASS 15/15 (lead-verified 2026-11-24)
+- [ ] Deploy on the ThinkCentre (needs user: public IP, port forwards 8883/8443, beacon dids, user names, who runs it)
+- [ ] Bench: smoke.py from outside the LAN against the public IP
 
 ### M3 firmware WiFi + MQTT
-- [ ] Fast connect + backoff (no reboot), outbox, dedupe, signed-config apply
-- [ ] Size gate <= 1.18 MB
-- [ ] Bench: hearts both ways via VPS; AP power-cycle; 24 h soak
+- [x] Fast connect + backoff (no reboot), outbox, dedupe, signed-config apply (hb_link / hb_config / hb_wire, host-tested; `hb_sim` + `fw/sim/bridge.py`)
+- [x] Size gate <= 1.18 MB: 953,696 B (77 %) with TLS + esp-mqtt (lead-verified). Watch: NimBLE in M4 adds ~150-250 KB
+- [ ] Bench (needs deploy + user OK to flash COM6, a flash backup first): hearts both ways via the server; AP power-cycle; 24 h soak
 
 ### M4 firmware BLE + handover
 - [ ] NimBLE service (RX/TX), LE SC bonding window (5 s hold), claim + WiFi setup over BLE
@@ -94,7 +95,8 @@ Tick a box only after its bench check passed.
 ### M5 Android app MVP
 - [x] `:core` relay/handover logic + codec tests (30 tests, 2026-11-23)
 - [~] Foreground service (`connectedDevice`), CDM presence, autoConnect GATT, MQTT, boot restart: written, compiles, not run on hardware
-- [~] Screens: all five on fakes (light + dark screenshots); real repo not wired
+- [x] Real data layer: `HttpApi` (pinned CA, IP-SAN check, 401/403/409/429 messages), Keystore-sealed creds, `RealRepo` + MQTT retry; error-state screens (41 core + 29 app tests, lead-verified 2026-11-24)
+- [ ] Drop the real `ca.crt` into `app/src/main/assets/hb_ca.pem` and the IP into `DEFAULT_HOST` after deploy; first on-phone run (Paho TLS on Android, bonding)
 - [x] Nav-bar fix: scrolling lists end at the navigation bar (Home, Device settings, App settings; doubled inset dropped on Add device); emulator before/after, 3-button nav, 2026-11-24
 - [x] Protocol round 2 (2026-11-24): phone `resp` ack for relayed uplinks, 896 B beacon cap, `net.wifi` out of cfg, lowercase state names, schedule past midnight, `mood.from` = display name, signature format, Mosquitto 1.6.9 ACL text, NAP off by default, `link` to router `{did, ble}`, state/tele to the phone, duplicate `show` -> `shown`. Spec + vectors, C / Python / Kotlin tests green (`./test.sh`); beacon outbox is logic only until M3/M4 radios
 - [ ] Bench: reconnect p95 < 10 s; force-stop + phone reboot recovery; overnight Doze delay log

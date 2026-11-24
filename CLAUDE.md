@@ -181,7 +181,18 @@ cd android && ./gradlew test --no-daemon                     # JDK 21; JAVA_HOME
 ```
 
 IDF environment: `. C:\esp\esp-idf\export.ps1` (PowerShell), `export.bat` (cmd), `. /c/esp/esp-idf/export.sh`
-(Git Bash).
+(Git Bash). On this PC set `$env:IDF_PYTHON_ENV_PATH = "C:\Users\Adity\.espressif\python_env\idf5.3_py3.11_env"`
+first (PATH has Python 3.12, the IDF env is 3.11). Build: `idf.py -C fw build` (size gate prints `size gate: N of
+1237319 bytes`; M3 image is ~954 KB, so M4's NimBLE must be trimmed to fit). The host test build compiles IDF's
+mbedTLS sources for config-signature checks (found automatically, or `-DHB_MBEDTLS_DIR`).
+
+- `hb_sim` (`fw/test/host/build/sim/hb_sim --port 7000 --did HB-000001`): the beacon's `hb_core` behind a line
+  TCP protocol (`fw/sim/README.md`); `fw/sim/bridge.py` connects it to a broker. Use it instead of hardware for
+  end-to-end runs; never write a separate beacon model.
+- Server end to end without the home server: `wsl -d Ubuntu-20.04 -e bash deploy/e2e-local.sh` (WSL has apt
+  Mosquitto 1.6.9, the same as the target; prints `SMOKE PASS`). Deploy steps: `deploy/RUNBOOK.md`.
+- `fw/main/certs/` and `android/app/src/main/assets/hb_ca.pem` hold **test** CA/keys until deploy; replace them
+  with the deployed `ca.crt` / `cfg-sign.pub` (the CA private key stays off the server).
 
 ## Broker and server
 
