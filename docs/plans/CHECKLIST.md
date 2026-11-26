@@ -223,5 +223,13 @@ over BLE), a long button hold for the pairing window, Add again (bond, Wi-Fi, cl
 relayed state/tele. Boot showed the `reset` wake and BT modem sleep on the main XTAL; a stale v1 core dump (other image
 SHA) was found by the new coredump check and erased.
 
+### D8 Updates from the cloud (user request 2026-11-26)
+- [ ] O1 App self-update: the server hosts signed APKs (version + sha256 in an endpoint); the app checks on start and
+  daily, downloads, verifies, and installs through PackageInstaller (REQUEST_INSTALL_PACKAGES, a user confirm each time)
+- [ ] O2 Beacon OTA over BLE from the app (with M7): the app fetches the image named by the signed `fw` config block,
+  checks its sha256 and streams it over the BLE link in chunks with acks; the beacon writes the passive slot, verifies
+  the signature, reboots, self-tests, marks valid (rollback otherwise). WiFi HTTPS OTA stays the default path
+- [ ] O3 Release flow: one command publishes a new app or firmware to the server (admin), so both update from the cloud
+
 ### D7 Hardware (M9, the user's call: "no hardware change for now")
 - [ ] H1 [u] Rev B: LED rail load switch on GPIO10 and a 32 kHz crystal (dark draw mA -> uA, BLE on the RTC clock)

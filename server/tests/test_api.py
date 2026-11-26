@@ -282,3 +282,16 @@ def test_firmware_files_are_public_and_confined(e, tmp_path):
     assert e.c.get("/fw/missing.bin").status_code == 404
     assert e.c.get("/fw/..%2Fhb.db").status_code == 404
     assert e.c.get("/fw/.hidden").status_code == 404
+
+
+def test_a_config_signed_before_new_keys_reads_with_their_defaults(e):
+    h = login(e, "alice")
+    assert e.c.post("/api/v1/devices/claim", json={"did": A}, headers=h).status_code == 200
+    old = json.loads(e.ctx.db.one("SELECT cfg FROM device WHERE did = ?", (A,))["cfg"])
+    old["led"].pop("presence")
+    old.pop("mood")  # as stored by a server from before 2026-11-26
+    e.ctx.db.x("UPDATE device SET cfg = ? WHERE did = ?", (json.dumps(old), A))
+    s = e.c.get(f"/api/v1/devices/{A}/settings", headers=h)
+    assert s.status_code == 200, s.text
+    assert s.json()["led"]["presence"] is False and s.json()["mood"] == {"rgb": "#ff4fa3", "pat": 0}
+    assert e.c.put(f"/api/v1/devices/{A}/settings", headers=h, json={"mood": {"pat": 1}}).status_code == 200

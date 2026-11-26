@@ -120,7 +120,9 @@ def sync_broker(ctx: Ctx) -> None:
 def current_config(ctx: Ctx, did: str) -> dict:
     row = ctx.db.one("SELECT cfg FROM device WHERE did = ?", (did,))
     if row and row["cfg"]:
-        return json.loads(row["cfg"])
+        # Through parse_config: a config signed before a schema addition gets the new keys' defaults
+        # (2026-11-26: led.presence and mood.* raised KeyError on every settings read).
+        return models.parse_config(row["cfg"].encode("utf-8"))
     cfg = {"cv": 1, "n": 1, "did": did, **copy.deepcopy(models.CONFIG_DEFAULTS)}
     cfg["srv"].update(hosts=list(ctx.hosts), mqtt=[ctx.mport], api=ctx.aport)
     cfg["sched"] = dict(SEED_SCHED)
