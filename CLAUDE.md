@@ -187,6 +187,11 @@ first (PATH has Python 3.12, the IDF env is 3.11). Build: `idf.py -C fw build` (
 app) or `app-flash`. The host test build compiles IDF's mbedTLS sources for config-signature checks (found
 automatically, or `-DHB_MBEDTLS_DIR`).
 
+- Carrier boards (Kconfig `HB_HW`): rev A = the deployed beacons (pixels GPIO2, battery GPIO3, LEDs always powered).
+  Rev B = `ESP32_heart.brd` (2026-11, CNC-milled): pixels GPIO10 via 330 ohm, battery GPIO4 (1M/1M), LED rail switch
+  GPIO7 (high = on, off after 2 s dark), USB sense GPIO3, LIS3DH INT1 GPIO1 + I2C 8/9 (no driver yet); GPIO2 free
+  (strapping). Build rev B: `idf.py -C fw -B fw/build-b -D SDKCONFIG=build-b/sdkconfig -D
+  SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.revb" build`. `HB_BATT_DIV_X1000` trims the divider per unit.
 - v1 is retired on v2 units: own partition table (`fw/partitions.csv`, two 1.9 MB OTA slots, no SPIFFS), so a v1 unit
   moves to v2 by one USB flash, not by v1 OTA. COM6's v1 flash backup: `%USERPROFILE%\hb-fw-backup\` (it holds v1
   WiFi credentials; keep it private).

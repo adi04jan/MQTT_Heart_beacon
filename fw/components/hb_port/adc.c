@@ -1,4 +1,4 @@
-// Battery on GPIO3 (ADC1) through a 1:2 divider, eFuse curve-fitting calibration.
+// Battery on HB_BATT_GPIO (ADC1) through a divider (HB_BATT_DIV_X1000), eFuse curve-fitting calibration.
 #include "hb_port.h"
 
 #include "esp_adc/adc_cali.h"
@@ -7,7 +7,6 @@
 #include "esp_check.h"
 
 #define SAMPLES 8
-#define DIVIDER 2
 
 static const char *TAG = "adc";
 static adc_oneshot_unit_handle_t s_adc;
@@ -40,5 +39,5 @@ uint32_t hb_adc_batt_mv(void)
             n++;
         }
     }
-    return n ? sum * DIVIDER / n : 0;
+    return n ? sum * CONFIG_HB_BATT_DIV_X1000 / (n * 1000) : 0;
 }

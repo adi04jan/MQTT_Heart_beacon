@@ -438,3 +438,22 @@ def test_anniversary_plays_celebrate_once_on_its_minute():
     pubs = tick(st, at + 10)
     assert sorted(t for t, p in pubs if p.get("k") == "celebrate") == [f"hb/v1/d/{A}/down", f"hb/v1/d/{B}/down"]
     assert not [p for _, p in tick(st, at + 20) if p.get("k") == "celebrate"]
+
+
+def test_phone_mood_glows_the_senders_own_live_beacon_on_any_path():
+    """2026-11-26: Bluetooth off on the phone, beacon on WiFi, a tap in the app logged but the beacon stayed dark:
+    the app only glowed it over BLE. The router does it on whatever path the beacon is live on, with the mood's id,
+    so a beacon that already played it from the phone over BLE dedupes this copy."""
+    st = mkstate()
+    up(st, A)
+    pubs = send(st, "hb/v1/u/alice/up", env("mood", EID, k="heart"))
+    assert only(pubs, f"hb/v1/d/{A}/down") == [{"v": 1, "t": "show", "id": EID, "ts": 1000, "k": "heart"}]
+    assert all(p.get("to") != A for p in only(pubs, "hb/v1/u/alice/down"))  # a glow, not a delivery: no rcpt
+    assert only(send(st, f"hb/v1/d/{A}/up", env("shown", EID), now=1001), "hb/v1/u/alice/down") == []
+    button = send(st, f"hb/v1/d/{A}/up", env("mood", "00000000000000ab", k="heart"), now=1002)
+    assert only(button, f"hb/v1/d/{A}/down") == []  # a press already glows its own beacon
+    near = mkstate()
+    up(near, A, path="ble")
+    relay = only(send(near, "hb/v1/u/alice/up", env("mood", EID, k="custom", rgb="#0a14c8", pat=1)), "hb/v1/u/alice/down")
+    assert [r["m"] for r in relay if r["t"] == "relay"] == [
+        {"v": 1, "t": "show", "id": EID, "ts": 1000, "k": "custom", "rgb": "#0a14c8", "pat": 1}]

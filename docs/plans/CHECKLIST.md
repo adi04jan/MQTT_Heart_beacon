@@ -232,4 +232,9 @@ SHA) was found by the new coredump check and erased.
 - [ ] O3 Release flow: one command publishes a new app or firmware to the server (admin), so both update from the cloud
 
 ### D7 Hardware (M9, the user's call: "no hardware change for now")
+- [x] Rev B pin map in firmware (2026-11-26, user approved the reviewer's table): Kconfig `HB_HW` A/B, `sdkconfig.revb`,
+  LED rail switch on GPIO7 with a 2 s dark hold, divider trim `HB_BATT_DIV_X1000`; both builds clean. Bench: rail logic
+  on rev A with `HB_LED_PWR_GPIO=10` (debug log) when the beacon is back on USB; real check on the first rev B board
+- [ ] Board fixes into `ESP32_heart_revB.sch/.brd` + 3D model (hardware reviewer, in progress)
+- [ ] LIS3DH use (motion wake on GPIO1, tap gestures): decide what it should do, then the driver
 - [ ] H1 [u] Rev B: LED rail load switch on GPIO10 and a 32 kHz crystal (dark draw mA -> uA, BLE on the RTC clock)

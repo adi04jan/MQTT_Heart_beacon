@@ -1,4 +1,4 @@
-// hb_port: hb_core's hardware, carrier rev A (plan "Firmware layout"). Every wait has a timeout.
+// hb_port: hb_core's hardware, carrier rev A or B (Kconfig HB_HW, plan "Firmware layout"). Every wait has a timeout.
 #pragma once
 
 #include <stdbool.h>
@@ -7,8 +7,20 @@
 #include "esp_err.h"
 #include "hb_core.h"
 
+#include "sdkconfig.h"
+
+// Button on CONFIG_HB_BTN_GPIO (0) on both. Rev B also has, not driven by any code yet: GPIO3 USB sense
+// (68k/100k from VBUS, digital), GPIO1 LIS3DH INT1 (deep-sleep wake capable), GPIO8/9 LIS3DH SDA/SCL at 0x19
+// (pull-ups on the breakout). GPIO2 is a strapping pin and stays free on rev B.
+#if CONFIG_HB_HW_B
+#define HB_HW "B"
+#define HB_LED_GPIO 10  // 9 WS2812-class pixels, GRB, through 330 ohm
+#define HB_BATT_GPIO 4  // ADC1_CH4, 1M/1M divider + 100 nF
+#else
+#define HB_HW "A"
 #define HB_LED_GPIO 2   // 9 WS2812-class pixels, GRB
 #define HB_BATT_GPIO 3  // ADC1, battery through a 1:2 divider
+#endif
 
 // main.c: the one event queue. Drivers post from their own tasks; hb_core runs on the main task only.
 void hb_port_post(const hb_ev_t *ev);
@@ -19,7 +31,7 @@ void hb_port_post_ble(const char *msg, size_t len);  // one whole message from t
 // led_rmt.c
 esp_err_t hb_led_init(void);
 esp_err_t hb_led_show(const uint8_t rgb[HB_PIXELS][3]);
-void hb_led_park(void);  // data line low, held through deep sleep
+void hb_led_park(void);  // rail off, data line low and held through deep sleep
 
 // adc.c
 esp_err_t hb_adc_init(void);

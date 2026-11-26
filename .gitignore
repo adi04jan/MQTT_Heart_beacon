@@ -9,6 +9,7 @@ android/core/build/
 android/local.properties
 android/app/build/
 fw/build/
+fw/build-b/
 fw/sdkconfig
 fw/sdkconfig.old
 

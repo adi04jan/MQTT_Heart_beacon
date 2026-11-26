@@ -4,7 +4,8 @@
 paho-mqtt in, route(), persist to SQLite, publish out, plus a 1 s tick.
 
 Rules: a `mood` from any member (beacon or phone) goes to every *other* member of the sender's circle, as
-`mood` to their phones and `show` to their beacons. Dedupe on (source did or uid, id). A beacon's downlink goes
+`mood` to their phones and `show` to their beacons; a phone's mood also glows the sender's own live beacons
+(`show` with the mood's id, untracked). Dedupe on (source did or uid, id). A beacon's downlink goes
 on its most recently reported live path (wifi: `d/{did}/down`; ble: `relay` to the owner's phone). No `shown`
 in 10 s: send once on the other path; still nothing after another 10 s: the beacon counts as unreachable and the
 delivery waits for it to show up again. Undelivered after 24 h: expired. The sender's phone gets `rcpt`
@@ -385,6 +386,12 @@ def _new_event(st, src, uid, eid, k, now, out):
             st.deliveries.append(d)
             _rcpt(st, d, "queued", now, out)
             _deliver(st, b, d, now, out)
+    if src == uid:  # from a phone: the sender's own live beacons glow too, on whatever path (a press glows itself).
+        # The mood's id, so a beacon that already played the phone's BLE copy dedupes this one; a glow, not a
+        # delivery (no rcpt, no retry; its `shown` matches nothing).
+        for b in sorted(st.beacons.values(), key=lambda b: b.did):
+            if b.owner == uid and b.live():
+                _send(st, b, b.live(), models.encode("show", eid, now, _kbody(k)), now, out)
     if k == "together":  # I3: a second member within 10 s: every beacon of both breathes in step
         other = next((u for u, t in st.together.items() if u != uid and now - t <= TOGETHER_S
                       and st.users.get(u) and st.users[u].circle == sender.circle), None)

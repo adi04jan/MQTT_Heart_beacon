@@ -1,5 +1,19 @@
 menu "Heart Beacon"
 
+    choice HB_HW
+        prompt "Carrier board"
+        default HB_HW_A
+        help
+            Rev A: the hand-built carrier the deployed beacons use (pixels on GPIO2, battery on GPIO3, LEDs
+            always powered). Rev B: the 2026-11 board (ESP32_heart.brd) with the LED load switch, the LIS3DH
+            and USB sense. Build it with SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.revb".
+
+        config HB_HW_A
+            bool "Rev A"
+        config HB_HW_B
+            bool "Rev B"
+    endchoice
+
     config HB_BTN_GPIO
         int "Button GPIO (active low, internal pull-up)"
         range 0 5
@@ -8,18 +22,30 @@ menu "Heart Beacon"
             Must be one of GPIO0-5: only those can wake the ESP32-C3 from deep sleep.
 
     config HB_LED_PWR_GPIO
-        int "LED rail load-switch GPIO, -1 = none"
+        int "LED rail load-switch GPIO (high = on), -1 = none"
         range -1 21
+        default 7 if HB_HW_B
         default -1
         help
-            -1 on carrier rev A (LEDs always powered). Rev B drives a high-side switch from GPIO10 (plan M9);
-            that driver is not written yet, so any other value fails the build.
+            Rev B: GPIO7 drives Q5, which turns on the P-FET Q6 in the LED rail; R8 keeps it off in reset and
+            deep sleep. -1 on rev A (LEDs always powered). On rev A a free pin (GPIO10) can stand in for a
+            bench check of the switching: the transitions log at debug level.
 
     config HB_HAS_XTAL32K
         bool "32 kHz crystal fitted"
+        depends on HB_HW_A
         default n
         help
-            The SuperMini has none. A crystal occupies GPIO0/1 and needs RTC_CLK_SRC_EXT_CRYS.
+            The SuperMini has none. A crystal occupies GPIO0/1 and needs RTC_CLK_SRC_EXT_CRYS; rev B uses
+            GPIO1 for the LIS3DH interrupt.
+
+    config HB_BATT_DIV_X1000
+        int "Battery divider ratio x 1000 (calibrate per unit)"
+        range 1000 4000
+        default 2000
+        help
+            Battery voltage = ADC pin voltage x this / 1000. Both revs use two equal resistors (rev B 1 MOhm
+            each, which reads a little low through the ADC's input leakage): trim against a meter.
 
     config HB_LED_WS2811_400K
         bool "LED timing: true 400 kHz (WS2811)"

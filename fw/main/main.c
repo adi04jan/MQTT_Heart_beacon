@@ -538,7 +538,7 @@ void app_main(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(hb_sleep_auto_light());
 
     s_x.fw = esp_app_get_description()->version;
-    s_x.hw = "A";
+    s_x.hw = HB_HW;
     s_x.rst = reset_name();
     s_x.cfg_key = cfg_key;
     s_x.cfg_key_len = (size_t)(cfg_key_end - cfg_key);  // PEM with its NUL (EMBED_TXTFILES)

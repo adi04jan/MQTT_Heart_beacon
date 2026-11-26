@@ -166,8 +166,8 @@ class RelayEngine(
     /** The app's own Heart / Sorry / Annoy. Works with no beacon at all. [id] is the event id `rcpt` will carry. */
     fun sendMood(k: String, now: Long, id: String = newId(), extra: JsonObject = JsonObject(emptyMap())): List<RelayOut> {
         val out = mutableListOf<RelayOut>()
-        // The router delivers only to the *other* members, so the sender's own beacon glows from here, as it does
-        // for its own button: a `show` with the mood's id (the beacon's dedupe ring stops any second play).
+        // The fast path for the sender's own glow: a `show` with the mood's id straight over BLE. The router also
+        // sends it (any path, same id), so with Bluetooth off it still glows; the beacon's dedupe ring plays it once.
         if (bleUp && did != null) {
             ownShows += id
             if (ownShows.size > 16) ownShows.remove(ownShows.first())
