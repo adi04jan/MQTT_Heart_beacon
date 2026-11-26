@@ -122,3 +122,46 @@ def test_assign_and_release(e):
     assert (row["owner"], row["claimed"], row["assigned_uid"]) == (None, 0, "bob")
     assert "Released" in e.c.get(f"/d/{A}?released").text
     assert e.c.get("/d/HB-000000").status_code == 404
+
+
+def _cert(path, not_after):
+    """A self-signed PEM certificate valid until `not_after` (datetime, UTC)."""
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.x509.oid import NameOID
+
+    k = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "hb test leaf")])
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(k.public_key())
+            .serial_number(1).not_valid_before(not_after - datetime.timedelta(days=900)).not_valid_after(not_after)
+            .sign(k, hashes.SHA256()))
+    path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+
+
+def test_cert_expiry_is_shown_on_the_admin_page_in_its_last_60_days(e, tmp_path):
+    import datetime
+
+    now = datetime.datetime.fromtimestamp(1_700_000_000, datetime.timezone.utc)
+    leaf = tmp_path / "leaf.crt"
+    _cert(leaf, now + datetime.timedelta(days=400))
+    e.ctx.tls_cert = str(leaf)
+    assert api.cert_days_left(str(leaf), 1_700_000_000) == 400
+    assert "TLS certificate" not in e.c.get("/").text
+    _cert(leaf, now + datetime.timedelta(days=30, hours=1))
+    page = e.c.get("/").text
+    assert "TLS certificate" in page and "expires in 30 days" in page
+    _cert(leaf, now - datetime.timedelta(days=2))
+    assert "expired 2 days ago" in e.c.get("/").text
+    assert api.cert_days_left(str(tmp_path / "missing.crt"), 0) is None
+
+
+def test_anniversary_is_saved_per_circle_and_validated(e):
+    r = e.c.post("/anniv", data={"circle": "home", "when": "02-14 09:00"}, headers={"origin": URL})
+    assert r.status_code == 303
+    assert e.ctx.db.one("SELECT value FROM setting WHERE key = 'anniv:home'")["value"] == "02-14 09:00"
+    assert "02-14 09:00" in e.c.get("/").text
+    assert e.c.post("/anniv", data={"circle": "home", "when": "2-14 9am"}, headers={"origin": URL}).status_code == 400
+    e.c.post("/anniv", data={"circle": "home", "when": ""}, headers={"origin": URL})
+    assert e.ctx.db.one("SELECT value FROM setting WHERE key = 'anniv:home'") is None

@@ -60,8 +60,8 @@ Additive changes (new keys, new `t`) stay `v:1`. A breaking change is `v:2` on t
 
 | `t` | Direction | Body | Notes |
 |---|---|---|---|
-| `mood` | beacon or app -> router; router -> phone | `k`: `heart` \| `sorry` \| `annoy`; `from` (router -> phone only): the sender's display name (the user's `name`, not the `uid`) | tap = heart, double = sorry, triple = annoy. Its `id` is the event id. |
-| `show` | router -> beacon | `k` | `id` = the originating `mood` id. Beacon dedupes on `id` (ring of 16 in RTC memory): a `show` whose `id` is already in the ring is answered with `shown` again and its effect is **not** replayed. |
+| `mood` | beacon or app -> router; router -> phone | `k`: `heart` \| `sorry` \| `annoy` \| `custom` \| `together`; with `custom` also `rgb` (`"#rrggbb"`) and `pat` (0 pulses, 1 breaths); `from` (router -> phone only): the sender's display name (the user's `name`, not the `uid`) | tap = heart, double = sorry, triple = annoy, tap then hold = custom (the sender's `mood.rgb` / `mood.pat`), hold let go between 2 s and 5 s = together. Its `id` is the event id. |
+| `show` | router -> beacon | `k`: a mood `k`, or `echo` (your heart just played on another desk), `celebrate` (the circle's anniversary); `custom` carries `rgb` and `pat`; `together` carries `at` (epoch s the shared breathing starts) when both pressed within 10 s, none for a one-sided invitation | `id` = the originating `mood` id (a fresh id for `echo`, `celebrate` and a synced `together`). Beacon dedupes on `id` (ring of 16 in RTC memory): a `show` whose `id` is already in the ring is answered with `shown` again and its effect is **not** replayed. |
 | `shown` | beacon -> router | none | `id` = the `show` id. Delivery receipt, sent for every `show` the beacon accepts, duplicates included. |
 | `rcpt` | router -> sender's phone | `to` (did), `st`: `queued` \| `shown` \| `expired` | `id` = the event id. |
 | `tele` | beacon -> router; router -> owner's phone (in `relay`) | `mv`, `pct`, `rssi`, `fw`, `hw`, `cfg`, `up_s`, `rst`, `heap` | every `tele_min`, and on each connect |
@@ -71,13 +71,16 @@ Additive changes (new keys, new `t`) stay `v:1`. A breaking change is `v:2` on t
 | `sleep` | router -> beacon | `for_s` (0 = until schedule or button) | |
 | `get` | either -> beacon | `what` | `get info` -> `resp` with `d`: `did`, `fw`, `hw`, `pv`, `min_pv`, `claimed` |
 | `resp` | beacon -> requester; phone -> beacon (relay ack) | `re` (request id), `ok`, `err` (when not ok), `d` (data) | `err` values: `unknown_t`; later milestones add more. The phone's relay ack is `{re: <beacon message id>, ok: true}` (section 4). |
-| `claim` | phone -> beacon, BLE only | `host`, `mport`, `aport`, `user`, `pass` | accepted once; refused until factory reset |
+| `claim` | phone -> beacon, BLE only | `host`, `mport`, `aport`, `user`, `pass` | from a bonded phone at any time; a new claim replaces the stored server credentials (the server issues a new password on every claim) |
 | `wifi.scan`, `wifi.list`, `wifi.set`, `wifi.forget`, `wifi.use` | phone -> beacon, BLE only | `ssid`, `psk`, `on` | max 4 networks; `wifi.set` replies with join result and reason; PSKs never read back. The only way WiFi reaches a beacon. |
 | `link` | phone -> beacon; phone -> router | to the beacon: exactly `{up}` (phone has its server link); to the router: exactly `{did, ble}` (BLE link to that beacon is up) | drives handover |
 | `relay` | phone <-> router | `did`, `m` (inner envelope, a JSON object) | wrapper for anything carried over BLE, and router -> phone for the beacon's `state` and `tele` (section 4). Never carries `cfg`. |
 | `reset` | phone -> beacon, BLE only | `what`: `wifi` \| `factory` | |
+| `streak` | router -> beacon; router -> phone | `n`: days in a row on which every member of the circle sent a heart | on every change and on each beacon connect; `n` > 0 lights the ember pixel |
+| `presence` | router -> beacon; router -> phone | `uid`, `near` (bool): another member's phone is near their beacon | on every change; the beacon shows it only with `led.presence` |
+| `batt` | router -> phone | `did`, `name` (owner's display name), `pct` | once when another member's beacon reports `pct` <= 15 (again after it was above 30) |
 
-Those 20 values of `t` are the known set (`vectors.json` `envelope.types`).
+Those 23 values of `t` are the known set (`vectors.json` `envelope.types`).
 
 ## 4. Transport and handover
 
@@ -93,6 +96,9 @@ Those 20 values of `t` are the known set (`vectors.json` `envelope.types`).
 | Dedupe | router: unique (`did`, `id`) per event. Beacon: `id` ring of 16; a duplicate `show` gets `shown` again without replaying the effect. |
 | Ordering | none guaranteed, none needed. Effects are idempotent; the router orders by receive time. |
 | Queue while asleep | router holds pending rows up to 24 h and flushes when `state` shows the beacon up. A burst arriving within 3 s plays each `k` once. |
+| Echo | when a delivery becomes `shown`, the router sends `show{k:"echo"}` (fresh id, best effort, not tracked) to the sender's own beacons. |
+| Together | a `together` mood is delivered as `show{k:"together"}` without `at` (an invitation: 3 breaths). If another member sends `together` within 10 s, every beacon of both gets `show{k:"together", at: <now + 2 s>}` and breathes 15 times in step (each beacon aligns its breath to `at` on its own clock). |
+| Good morning | the beacon keeps the last mood it played; at the first schedule start after it, it replays it once at 30 % brightness. |
 
 ## 5. MQTT
 
@@ -207,7 +213,7 @@ They reach the beacon only over BLE (`wifi.*`). A `net.wifi` key is an unknown k
   "led": {"bright": 60},
   "sched": {"on": true, "tz": 330, "days": "1111100", "start": "09:00", "stop": "19:00"},
   "pwr": {"idle_nap_min": 90, "nap_wake_min": 15, "batt_low_mv": 3450, "batt_off_mv": 3300, "batt_cal_ppm": 0},
-  "ble": {"adv_fast_ms": 100, "adv_fast_s": 30, "adv_slow_ms": 500, "conn_ms": 500, "latency": 3, "sup_ms": 6000},
+  "ble": {"adv_fast_ms": 100, "adv_fast_s": 30, "adv_slow_ms": 500, "conn_ms": 180, "latency": 0, "sup_ms": 6000},
   "net": {"use_wifi": true, "near_hold_s": 30, "away_grace_s": 60, "tele_min": 30},
   "fw": {"ver": "2.0.0", "path": "/fw/hb-2.0.0.bin", "sha256": "", "min_mv": 3700}
 }
@@ -225,6 +231,9 @@ They reach the beacon only over BLE (`wifi.*`). A `net.wifi` key is an unknown k
 | `srv.api` | int 1..65535 | `8443` | admin |
 | `name` | string 0..32 bytes | `""` | user, admin |
 | `led.bright` | int 0..100 (percent) | `60` | user, admin |
+| `led.presence` | bool: a faint pixel while another member's phone is near their beacon | `false` | user, admin |
+| `mood.rgb` | `"#rrggbb"` (7 bytes, lowercase hex): the custom mood's colour | `"#ff4fa3"` | user, admin |
+| `mood.pat` | int 0..1 (0 = 3 pulses, 1 = 3 slow breaths) | `0` | user, admin |
 | `sched.on` | bool | `false` (always on) | user, admin |
 | `sched.tz` | int -720..840 (minutes east of UTC); the zone the schedule runs in (`time.tz` is informational) | `0` | user, admin |
 | `sched.days` | 7 chars of `0`/`1`, Monday first: the days a window **starts** on | `"1111100"` | user, admin |
@@ -235,8 +244,8 @@ They reach the beacon only over BLE (`wifi.*`). A `net.wifi` key is an unknown k
 | `pwr.batt_cal_ppm` | int -200000..200000 (divider correction) | `0` | admin |
 | `ble.adv_fast_ms`, `ble.adv_slow_ms` | int 20..10240 | `100`, `500` | admin |
 | `ble.adv_fast_s` | int 0..600 | `30` | admin |
-| `ble.conn_ms` | int 8..4000 | `500` | admin |
-| `ble.latency` | int 0..499 | `3` | admin |
+| `ble.conn_ms` | int 8..4000 | `180` | admin |
+| `ble.latency` | int 0..499 | `0` | admin |
 | `ble.sup_ms` | int 100..32000, and `sup_ms > 2 * (1 + latency) * conn_ms` | `6000` | admin |
 | `net.use_wifi` | bool | `true` | user, admin |
 | `net.near_hold_s`, `net.away_grace_s` | int 0..3600 | `30`, `60` | admin |
@@ -297,3 +306,6 @@ Every entry keeps `v:1`: these are clarifications and additive rules, not wire b
 |---|---|
 | 2026-11-23 | First version (M0). |
 | 2026-11-24 | Round 2. `state.st` values are exact lowercase names (`envelope.states`); receivers drop others. Schedule windows: `stop <= start` runs past midnight and belongs to the start day, `start == stop` is 24 h; `sched.tz` governs, `time.tz` is informational (7.2, `config.sched`). `pwr.idle_nap_min` defaults to 0 (NAP off). The phone acks every relayed beacon uplink with `resp{re, ok:true}` once the broker PUBACKs the `relay`; that is the BLE ack for the 5 s resend rule. Beacon-originated messages capped at 896 B so a `relay` always fits (`envelope.size`). `link` to the router is exactly `{did, ble}`. Router forwards the beacon's `state` and `tele` to the owner's phone in a `relay`. `mood.from` is the sender's display name. A duplicate `show` is answered with `shown` again without replaying. Config signature format written down (7.1, `config.signature`). `net.wifi` removed from the config; signed `cfg` reaches the phone only through the API, never in a `relay`. Broker section: Mosquitto 1.6.9 instance with `password_file` + `pattern` ACL (5.1); claim rule (5.2). |
+| 2026-11-26 | M4 bench. The beacon also sends `state` and `tele` whenever the phone says `link{up:true}` (a new app session on a kept connection gets the device status). `wifi.set` tries the network before storing it; its `resp` `err` is short text for a person (`wrong password`, `network not found`, `no answer`, `busy`, ...). Request field errors are `bad_<key>`; a bonded phone may `claim` again (it replaces the credentials); `wifi.use` answers `unsupported` (`net.use_wifi` stays in the signed config). |
+| 2026-11-26 | Config defaults `ble.conn_ms` 500 -> 180 and `ble.latency` 3 -> 0 (`config.defaults`, parse vectors): a phone's heart reaches the beacon in about 0.2 s instead of up to 2 s. The beacon's RX characteristic also takes write-without-response; senders may write every frame but a message's last one without response. |
+| 2026-11-26 | Review ideas, all additive (`v:1`): moods `custom` (`rgb`, `pat`) and `together`; shows `echo`, `celebrate`, synced `together` (`at`); new types `streak`, `presence`, `batt` (23 known); config `led.presence`, `mood.rgb`, `mood.pat`; router rules Echo and Together; the beacon's good-morning replay. |

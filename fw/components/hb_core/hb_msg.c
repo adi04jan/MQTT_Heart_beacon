@@ -6,6 +6,7 @@
 static const char *const k_types[] = {
     "mood", "show", "shown", "rcpt", "tele", "state", "cfg", "time", "sleep", "get", "resp",
     "claim", "wifi.scan", "wifi.list", "wifi.set", "wifi.forget", "wifi.use", "link", "relay", "reset",
+    "streak", "presence", "batt",
 };
 
 bool hb_id_parse(const char *s, uint64_t *out)

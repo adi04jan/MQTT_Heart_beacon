@@ -13,7 +13,7 @@ fw/test/host/build/sim/hb_sim --port 7000 --did HB-000001  # prints "listening 7
 ```
 
 Options: `--port` (0 = any free port, printed), `--did` (default `HB-000001`), `--key` (config signing key,
-SPKI PEM or DER; default `fw/main/certs/cfg-sign.pub`, the same file the firmware pins). It listens on
+SPKI PEM or DER; default `fw/test/certs/cfg-sign.pub`, the test key; the firmware pins the deployed one). It listens on
 127.0.0.1 only, serves one client at a time, and every connection starts a fresh beacon (asleep until `boot`).
 
 ## Line protocol
@@ -81,6 +81,6 @@ HB_MQTT_PASS=... python fw/sim/bridge.py --sim 127.0.0.1:7000 --broker <server-i
 python fw/sim/bridge.py --sim 127.0.0.1:7000 --broker 127.0.0.1:1883   # a local test broker, plain
 ```
 
-`fw/main/certs/` holds **test-only** files: a throwaway CA from `deploy/mkca.sh 127.0.0.1` (private key not
-kept) and the `protocol/vectors.json` config test key. Replace both with the deploy `ca.crt` and
-`cfg-sign.pub` before talking to the real server.
+`fw/test/certs/` holds **test-only** files: a throwaway CA from `deploy/mkca.sh 127.0.0.1` (private key not
+kept) and the `protocol/vectors.json` config test key. The firmware pins the deployed `ca.crt` and
+`cfg-sign.pub` from `fw/main/certs/`.

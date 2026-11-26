@@ -69,14 +69,17 @@ class Format(private val zone: ZoneId, private val locale: Locale) {
             Mood.HEART -> "a Heart"
             Mood.SORRY -> "a Sorry"
             Mood.ANNOY -> "an Annoy"
+            Mood.CUSTOM -> "their colour"
+            Mood.TOGETHER -> "a Together"
         }
         return "${from ?: "You"} sent $what"
     }
 
+    /** A sent mood's delivery in words (review U2): where it is, not a status code. */
     fun mark(m: Mark): String = when (m) {
-        Mark.QUEUED -> "Queued"
-        Mark.SHOWN -> "Shown"
-        Mark.EXPIRED -> "Expired"
+        Mark.QUEUED -> "On its way"
+        Mark.SHOWN -> "Glowing on their desk"
+        Mark.EXPIRED -> "Didn't reach them"
     }
 }
 

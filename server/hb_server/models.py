@@ -10,6 +10,7 @@ MAX_MSG = 1024
 TYPES = frozenset({
     "mood", "show", "shown", "rcpt", "tele", "state", "cfg", "time", "sleep", "get", "resp",
     "claim", "wifi.scan", "wifi.list", "wifi.set", "wifi.forget", "wifi.use", "link", "relay", "reset",
+    "streak", "presence", "batt",
 })
 # `state.st` values (PROTOCOL.md 3), exact and lowercase; LWT_STATE only as the broker-published will.
 STATES = ("pairing", "near", "away", "offline", "nap", "sleep", "lowbatt")
@@ -166,6 +167,7 @@ _HHMM = re.compile(r"([01][0-9]|2[0-3]):[0-5][0-9]")
 _DAYS = re.compile(r"[01]{7}")
 _SHA = re.compile(r"[0-9a-f]{64}")
 _DID = re.compile(r"HB-[0-9A-F]{6}")
+_RGB = re.compile(r"#[0-9a-f]{6}")
 _mv = _int(3000, 4200)
 _port = _int(1, 65535)
 
@@ -173,7 +175,8 @@ _port = _int(1, 65535)
 _SCHEMA = {
     "srv": {"hosts": ([], _list(_text(1, 64), 0, 4)), "mqtt": ([8883], _list(_port, 1, 4)), "api": (8443, _port)},
     "name": ("", _text(0, 32)),
-    "led": {"bright": (60, _int(0, 100))},
+    "led": {"bright": (60, _int(0, 100)), "presence": (False, _is_bool)},
+    "mood": {"rgb": ("#ff4fa3", lambda v: isinstance(v, str) and bool(_RGB.fullmatch(v))), "pat": (0, _int(0, 1))},
     "sched": {"on": (False, _is_bool), "tz": (0, _int(-720, 840)),
               "days": ("1111100", lambda v: isinstance(v, str) and bool(_DAYS.fullmatch(v))),
               "start": ("09:00", lambda v: isinstance(v, str) and bool(_HHMM.fullmatch(v))),
@@ -181,8 +184,8 @@ _SCHEMA = {
     "pwr": {"idle_nap_min": (0, _int(0, 1440)), "nap_wake_min": (15, _int(1, 1440)),
             "batt_low_mv": (3450, _mv), "batt_off_mv": (3300, _mv), "batt_cal_ppm": (0, _int(-200000, 200000))},
     "ble": {"adv_fast_ms": (100, _int(20, 10240)), "adv_fast_s": (30, _int(0, 600)),
-            "adv_slow_ms": (500, _int(20, 10240)), "conn_ms": (500, _int(8, 4000)),
-            "latency": (3, _int(0, 499)), "sup_ms": (6000, _int(100, 32000))},
+            "adv_slow_ms": (500, _int(20, 10240)), "conn_ms": (180, _int(8, 4000)),
+            "latency": (0, _int(0, 499)), "sup_ms": (6000, _int(100, 32000))},
     "net": {"use_wifi": (True, _is_bool), "near_hold_s": (30, _int(0, 3600)), "away_grace_s": (60, _int(0, 3600)),
             "tele_min": (30, _int(1, 1440))},  # no WiFi here: PSKs go over BLE only (PROTOCOL.md 7)
     "fw": {"ver": ("", _text(0, 16)), "path": ("", _text(0, 96)),

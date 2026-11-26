@@ -1,5 +1,6 @@
 #include "hb_config.h"
 
+#include <stdlib.h>
 #include <string.h>
 #include "mbedtls/pk.h"
 #include "mbedtls/sha256.h"
@@ -153,6 +154,21 @@ static const char *parse(const cJSON *root, hb_cfg_t *c)
 
     BLOCK(led, "led");
     OPT_INT(led, "bright", "led.bright", 0, 100, c->bright);
+    OPT_BOOL(led, "presence", "led.presence", c->presence);
+
+    BLOCK(mood, "mood");
+    {
+        char rgb[8];
+        const cJSON *j = get(mood, "rgb");
+        if (j && (!str_in(j, 7, 7, rgb) || rgb[0] != '#' || strspn(rgb + 1, "0123456789abcdef") != 6)) {
+            return "mood.rgb";
+        }
+        for (int k = 0; j && k < 3; k++) {  // "#rrggbb", lowercase hex
+            char h[3] = {rgb[1 + 2 * k], rgb[2 + 2 * k], 0};
+            c->mood_rgb[k] = (uint8_t)strtoul(h, NULL, 16);
+        }
+    }
+    OPT_INT(mood, "pat", "mood.pat", 0, 1, c->mood_pat);
 
     BLOCK(sched, "sched");
     OPT_BOOL(sched, "on", "sched.on", c->sched_on);

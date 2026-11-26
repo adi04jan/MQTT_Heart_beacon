@@ -96,6 +96,7 @@ class HomeVm(private val repo: HeartRepo) : ViewModel() {
 /** Home: your beacon's twin on its stage, the recent moods right under it, then its settings. */
 @Composable
 fun HomeScreen(vm: HomeVm, onAdd: () -> Unit, onSettings: () -> Unit) {
+    var preview by remember { mutableStateOf<Int?>(null) }  // review U1: live brightness while dragging
     val beacon by vm.beacon.collectAsStateWithLifecycle()
     val events by vm.events.collectAsStateWithLifecycle()
     val server by vm.server.collectAsStateWithLifecycle()
@@ -132,7 +133,8 @@ fun HomeScreen(vm: HomeVm, onAdd: () -> Unit, onSettings: () -> Unit) {
                     beacon = beacon,
                     server = server,
                     events = events,
-                    bright = settings?.bright ?: 100,
+                    bright = preview ?: settings?.bright ?: 100,
+                    previewing = preview != null,
                     fmt = fmt,
                     onSend = vm::send,
                     onAdd = onAdd,
@@ -168,7 +170,9 @@ fun HomeScreen(vm: HomeVm, onAdd: () -> Unit, onSettings: () -> Unit) {
             val b = beacon
             val cur = settings
             if (b != null && cur != null) {
-                beaconSettings(cur, fmt, settingsNote(b, fmt), b.presence == Presence.Near, vm::update, { forgetting = it }) { dialog = it }
+                beaconSettings(cur, fmt, settingsNote(b, fmt), b.presence == Presence.Near, vm::update, { forgetting = it },
+                    onPreview = { preview = it },
+                    workshop = listOfNotNull(b.did, b.rssi?.takeIf { it < 0 }?.let { "Wi-Fi $it dBm" }).joinToString(" · ")) { dialog = it }
             }
         }
 

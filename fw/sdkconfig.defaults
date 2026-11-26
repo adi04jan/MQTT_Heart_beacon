@@ -2,16 +2,15 @@
 # sdkconfig is generated from this file: idf.py -C fw set-target esp32c3
 CONFIG_IDF_TARGET="esp32c3"
 
-# Flash and partitions: arduino-esp32's stock 4 MB layout (partitions.csv is a byte copy of
-# esp32 3.2.1 tools/partitions/default.csv), so a v1 unit can take this image over the air.
+# Flash and partitions: our own layout (partitions.csv), two 1.9 MB OTA slots. v1 is retired: units are
+# flashed over USB once (bootloader, table and app), then update over the air.
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
-# Same as the v1 bootloader (arduino-esp32 3.2.1 esp32c3 sdkconfig): an image is NEW until the app
-# confirms it, so main.c calls esp_ota_mark_app_valid_cancel_rollback().
+# Rollback: an OTA image is NEW until the app confirms it (main.c esp_ota_mark_app_valid_cancel_rollback).
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
 # Power: frequency scaling + automatic light sleep, tickless idle (as AI-Notes-recorder/firmware).
@@ -26,10 +25,40 @@ CONFIG_RTC_CLK_SRC_INT_RC=y
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 
-# Size: the image has to fit the 1.18 MB gate for the life of rev A.
+# Size: optimise for size; the build fails above 1.9 MB (CMakeLists.txt size gate, 2 x 1.9 MB OTA slots).
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 
 # M3: WiFi station + MQTT 5 over TLS (esp-mqtt). The main task verifies config signatures (mbedTLS ECDSA) and
 # prints messages, so it gets more than the 3.5 KB default stack.
 CONFIG_MQTT_PROTOCOL_5=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# M4: BLE peripheral (NimBLE), one connection, three bonds kept in NVS, LE Secure Connections (PROTOCOL.md 6).
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_MAX_BONDS=3
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+CONFIG_BT_NIMBLE_SM_SC=y
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
+CONFIG_BT_NIMBLE_50_FEATURE_SUPPORT=n
+CONFIG_BT_NIMBLE_LOG_LEVEL_WARNING=y
+# BT modem sleep (review P1): the controller sleeps between connection events on the main XTAL (rev A has no
+# 32 kHz crystal), kept powered in light sleep, so NEAR can light sleep. Measure NEAR current to confirm (P2).
+CONFIG_BT_CTRL_MODEM_SLEEP=y
+CONFIG_BT_CTRL_MODEM_SLEEP_MODE_1=y
+CONFIG_BT_CTRL_LPCLK_SEL_MAIN_XTAL=y
+CONFIG_BT_CTRL_MAIN_XTAL_PU_DURING_LIGHT_SLEEP=y
+
+# A hung loop reboots instead of draining the battery: main is subscribed to the task watchdog and its longest
+# wait is 30 s (HB_BATT_PERIOD_MS). Review 2026-11-26 R7.
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=60
+# The crash is kept for `idf.py coredump-info` in the 64 KB coredump partition; `tele` carries `dump`. R9.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y

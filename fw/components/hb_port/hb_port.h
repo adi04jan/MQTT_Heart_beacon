@@ -14,6 +14,7 @@
 void hb_port_post(const hb_ev_t *ev);
 void hb_port_post_rx(const char *topic, int topic_len, const char *data, int data_len);  // copies both
 void hb_port_post_puback(int msg_id);
+void hb_port_post_ble(const char *msg, size_t len);  // one whole message from the phone; copied
 
 // led_rmt.c
 esp_err_t hb_led_init(void);
@@ -41,12 +42,27 @@ esp_err_t hb_store_set_blob(const char *key, const void *v, size_t len);
 esp_err_t hb_store_erase_all(void);
 
 // wifi.c: station for hb_link. Posts HB_EV_WIFI; hb_link bounds every attempt, the driver never waits here.
+// Networks (max HB_WIFI_NETS) are stored in NVS as ssid0..3 / psk0..3.
+#define HB_WIFI_NETS 4
+typedef struct {
+    char ssid[33];
+    int8_t rssi;
+    bool sec;
+} hb_net_t;
 esp_err_t hb_wifi_init(void);
 bool hb_wifi_cached(void);       // a BSSID + channel from the last join is in RTC memory
 void hb_wifi_forget(void);       // drop it (the network changed)
-void hb_wifi_join(bool fast);    // fast: the cached BSSID on its channel; else scan all channels, strongest AP
+void hb_wifi_join(bool fast);    // fast: the cached BSSID on its channel; else scan, strongest AP of any stored network
+void hb_wifi_try(const char *ssid, const char *psk);  // join this network now (wifi.set tries before it stores)
 void hb_wifi_stop(void);
 int hb_wifi_rssi(void);          // dBm, 0 when not associated
+const char *hb_wifi_why(void);   // the last failure for a person: "wrong password", "network not found", ...
+int hb_wifi_scan(hb_net_t *out, int max);  // blocking, ~2 s; strongest first, one per name; -1 when busy
+int hb_wifi_nets(char ssids[HB_WIFI_NETS][33]);  // the stored networks, packed; returns how many
+bool hb_wifi_room(const char *ssid);         // ssid is stored already, or a slot is free
+esp_err_t hb_wifi_add(const char *ssid, const char *psk);  // replaces ssid's slot or takes a free one
+esp_err_t hb_wifi_remove(const char *ssid);  // ESP_ERR_NOT_FOUND
+void hb_wifi_clear(void);
 
 // mqtt.c: MQTT 5 over TLS (esp-mqtt) for hb_link. Posts HB_EV_MQTT, puback and rx.
 typedef struct {
@@ -62,5 +78,13 @@ void hb_mqtt_stop(void);  // clean DISCONNECT when connected (no LWT); bounded b
 int hb_mqtt_publish(const char *topic, const char *json, int len, bool retain);  // QoS 1; msg id or -1
 bool hb_mqtt_flush(uint32_t ms);  // waits until every QoS 1 publish is acked, at most ms
 
-// console.c: temporary M3 provisioning over the USB console (M4 moves it to BLE).
+// ble.c: NimBLE peripheral (PROTOCOL.md 6). Posts HB_EV_BLE and whole messages (hb_port_post_ble).
+esp_err_t hb_ble_init(const char *did, const hb_cfg_t *cfg);
+void hb_ble_params(const hb_cfg_t *cfg);      // advertising and connection parameters from a new config
+void hb_ble_window(bool open);                // the pairing window: new bonds allowed, fast advertising
+bool hb_ble_send(const char *json, int len);  // false without an encrypted link
+void hb_ble_flush(uint32_t ms);               // before deep sleep: let the last notifies go out, then hang up
+void hb_ble_forget_all(void);                 // factory reset: every bond
+
+// console.c: bench view of the provisioning over the USB console (BLE is the way in).
 void hb_console_start(void);

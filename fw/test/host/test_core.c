@@ -9,11 +9,13 @@
 #include <string.h>
 
 static bool g_wifi, g_cached;  // hb_boot_t.wifi / .ap_cached for the next boot()
+static bool g_quiet_phone;     // the NEAR phone stops its `time` every 4 min (Doze)
+static uint32_t g_hello_at;
 static bool g_emit;            // run every step's actions through hb_wire_emit into g_pubs
 
 void setUp(void)
 {
-    g_wifi = g_cached = g_emit = false;
+    g_wifi = g_cached = g_emit = g_quiet_phone = false;
 }
 void tearDown(void) {}
 
@@ -112,10 +114,25 @@ static void test_holds_fire_while_held_and_release_is_not_a_tap(void)
     TEST_ASSERT_EQUAL_INT(HB_BTN_PAIR, got[1]);
     TEST_ASSERT_UINT32_WITHIN(10, HB_BTN_DEBOUNCE_MS + HB_BTN_PAIR_MS, at[1]);
 
-    const edge_t tap_then_hold[] = {{0, 1}, {100, 0}, {300, 1}, {1200, 0}};
+    const edge_t tap_then_hold[] = {{0, 1}, {100, 0}, {300, 1}, {3200, 0}};  // review I6: the custom mood
     hb_btn_init(&b, false, 0);
-    TEST_ASSERT_EQUAL_INT(1, feed(&b, tap_then_hold, 4, 3000, got, at));
+    TEST_ASSERT_EQUAL_INT(1, feed(&b, tap_then_hold, 4, 5000, got, at));  // and no TOGETHER on its release
+    TEST_ASSERT_EQUAL_INT(HB_BTN_CUSTOM, got[0]);
+
+    const edge_t together[] = {{0, 1}, {3000, 0}};  // review I3: a hold let go between 2 s and 5 s
+    hb_btn_init(&b, false, 0);
+    TEST_ASSERT_EQUAL_INT(2, feed(&b, together, 2, 5000, got, at));
     TEST_ASSERT_EQUAL_INT(HB_BTN_HOLD, got[0]);
+    TEST_ASSERT_EQUAL_INT(HB_BTN_TOGETHER, got[1]);
+    const edge_t short_hold[] = {{0, 1}, {1500, 0}};  // under 2 s: just the battery bar
+    hb_btn_init(&b, false, 0);
+    TEST_ASSERT_EQUAL_INT(1, feed(&b, short_hold, 2, 4000, got, at));
+
+    const edge_t reset[] = {{0, 1}, {16000, 0}};  // review R8: 15 s is a factory reset
+    hb_btn_init(&b, false, 0);
+    TEST_ASSERT_EQUAL_INT(3, feed(&b, reset, 2, 18000, got, at));
+    TEST_ASSERT_EQUAL_INT(HB_BTN_RESET, got[2]);
+    TEST_ASSERT_UINT32_WITHIN(10, HB_BTN_DEBOUNCE_MS + HB_BTN_RESET_MS, at[2]);
 }
 
 static void test_wake_press_is_swallowed_but_can_still_hold(void)
@@ -389,7 +406,7 @@ static struct {
     uint8_t cmd;  // hb_link_cmd_t
     uint32_t t;
 } g_links[64];  // every link command since boot()
-static int g_n_links, g_teles, g_reports;
+static int g_n_links, g_teles, g_reports, g_factory;
 
 static struct {
     char topic[HB_TOPIC_MAX];
@@ -426,6 +443,7 @@ static void rec(void)
         g_links[g_n_links++].t = now;
     }
     g_teles += act.tele;
+    g_factory += act.factory_reset;
     g_reports += act.state_changed;
 }
 
@@ -435,7 +453,8 @@ static void boot(hb_wake_t wake, bool claimed, bool pressed, uint32_t mv, uint32
     g_mv = mv;
     g_mood = HB_MOOD_NONE;
     g_n_ups = 0;
-    g_n_links = g_teles = g_reports = g_n_pubs = 0;
+    g_n_links = g_teles = g_reports = g_n_pubs = g_factory = 0;
+    g_hello_at = now;
     hb_boot_t b = {.wake = wake, .claimed = claimed, .pressed = pressed, .mv = mv, .epoch = epoch, .seed = 42,
                    .wifi = g_wifi, .ap_cached = g_cached};
     hb_core_boot(&core, &g_cfg, &b, now, &act);
@@ -469,6 +488,12 @@ static bool run(uint32_t ms, bool pressed)
         step(&e);
     }
     while (!act.sleep && (int32_t)(end - now) > 0) {
+        if (!g_quiet_phone && core.ble && core.phone && now - g_hello_at >= 240000) {
+            g_hello_at = now;  // the app's `time` every 4 min, which keeps a NEAR phone counted as alive
+            hb_ev_t h = {.type = HB_EV_HELLO};
+            step(&h);
+            continue;
+        }
         if (act.measure_batt) {
             for (int i = 0; i < HB_PIXELS; i++) {
                 g_measured_lit += (core.led[i][0] | core.led[i][1] | core.led[i][2]) != 0;
@@ -487,10 +512,26 @@ static bool run(uint32_t ms, bool pressed)
     return act.sleep;
 }
 
+static void wifi(bool up);
+static void mqtt(bool up);
+
+// A path report the way the radios make one: BLE = an encrypted link whose phone has its server link;
+// WIFI = the WiFi link comes up (provisioned on the spot); NONE = both gone.
 static void path(hb_path_t p)
 {
-    hb_ev_t e = {.type = HB_EV_PATH, .path = p};
+    hb_ev_t e = {.type = HB_EV_BLE, .up = p == HB_PATH_BLE};
     step(&e);
+    if (p == HB_PATH_BLE) {
+        e.type = HB_EV_PHONE;
+        step(&e);
+    } else if (p == HB_PATH_WIFI && core.link.st != HB_LS_UP) {
+        e = (hb_ev_t){.type = HB_EV_PROV, .up = true};
+        step(&e);
+        wifi(true);
+        mqtt(true);
+    } else if (p == HB_PATH_NONE && core.link.st == HB_LS_UP) {
+        wifi(false);
+    }
 }
 
 static void ack(uint64_t id)
@@ -563,10 +604,9 @@ static void test_five_second_hold_opens_pairing_and_claim_closes_it(void)
     TEST_ASSERT_EQUAL_INT(HB_ST_PAIRING, act.state);
     run(100, false);
     TEST_ASSERT_EQUAL_UINT8(0, core.n_out);  // a hold never sends
-    hb_ev_t e = {.type = HB_EV_PATH, .path = HB_PATH_BLE};
-    step(&e);
+    path(HB_PATH_BLE);
     TEST_ASSERT_EQUAL_INT(HB_ST_PAIRING, act.state);
-    e = (hb_ev_t){.type = HB_EV_CLAIMED};
+    hb_ev_t e = {.type = HB_EV_CLAIMED};
     step(&e);
     TEST_ASSERT_EQUAL_INT(HB_ST_NEAR, act.state);
     TEST_ASSERT_TRUE(act.state_changed);
@@ -577,14 +617,14 @@ static void test_path_picks_near_away_offline(void)
 {
     g_cfg = hb_cfg_default;
     boot(HB_WAKE_POWERON, true, false, 3900, 0);
-    hb_ev_t e = {.type = HB_EV_PATH, .path = HB_PATH_WIFI};
-    step(&e);
+    path(HB_PATH_WIFI);
     TEST_ASSERT_EQUAL_INT(HB_ST_AWAY, act.state);
-    e.path = HB_PATH_BLE;
-    step(&e);
+    path(HB_PATH_BLE);
     TEST_ASSERT_EQUAL_INT(HB_ST_NEAR, act.state);
-    e.path = HB_PATH_NONE;
+    hb_ev_t e = {.type = HB_EV_BLE, .up = false};
     step(&e);
+    TEST_ASSERT_EQUAL_INT(HB_ST_AWAY, act.state);  // the BLE link went, WiFi is still up
+    path(HB_PATH_NONE);
     TEST_ASSERT_EQUAL_INT(HB_ST_OFFLINE, act.state);
 }
 
@@ -612,8 +652,7 @@ static void test_nap_is_off_by_default_and_never_happens_near(void)
 
     g_cfg.idle_nap_min = 90;
     boot(HB_WAKE_POWERON, true, false, 3900, 0);
-    hb_ev_t e = {.type = HB_EV_PATH, .path = HB_PATH_BLE};
-    step(&e);
+    path(HB_PATH_BLE);
     TEST_ASSERT_FALSE(run(3 * 3600000u, false));
     TEST_ASSERT_EQUAL_INT(HB_ST_NEAR, act.state);
 }
@@ -632,7 +671,19 @@ static void test_nap_timer_wake_checks_in_then_naps_again(void)
     uint32_t t0 = now;
     TEST_ASSERT_TRUE(run(60000, false));
     TEST_ASSERT_EQUAL_INT(HB_ST_NAP, act.state);
-    TEST_ASSERT_UINT32_WITHIN(HB_TICK_MS, HB_NAP_CHECKIN_MS, now - t0);
+    TEST_ASSERT_UINT32_WITHIN(HB_TICK_MS, HB_NAP_LINK_MS, now - t0);  // no link came: gives up after 45 s
+
+    g_wifi = true;  // review R4: a slow link (15 s to CONNACK) still gets its 10 s for queued hearts
+    boot(HB_WAKE_TIMER, true, false, 3900, 0);
+    t0 = now;
+    wifi(true);
+    TEST_ASSERT_FALSE(run(15000, false));
+    mqtt(true);
+    TEST_ASSERT_FALSE(run(HB_NAP_CHECKIN_MS - 500, false));
+    TEST_ASSERT_TRUE(run(60000, false));
+    TEST_ASSERT_EQUAL_INT(HB_ST_NAP, act.state);
+    TEST_ASSERT_UINT32_WITHIN(HB_TICK_MS + 1, 15000 + HB_NAP_CHECKIN_MS, now - t0);
+    g_wifi = false;
 
     boot(HB_WAKE_BUTTON, true, true, 3900, 0);  // button wake: awake again for the full idle time
     TEST_ASSERT_EQUAL_UINT8(HB_FX_BATT, core.fx.kind);
@@ -673,6 +724,57 @@ static void test_button_wake_out_of_hours_stays_up_five_minutes(void)
     boot(HB_WAKE_TIMER, true, false, 3900, SUN_1200);  // early timer wake (RC drift): back to sleep at once
     TEST_ASSERT_TRUE(act.sleep);
     TEST_ASSERT_EQUAL_INT(HB_ST_SLEEP, act.state);
+}
+
+// Review 2026-11-26 R2: on USB power the beacon never sleeps, so now_ms runs past 2^31 (24.86 days) and wraps at
+// 49.7 days. A deadline left in the past used to wrap into the future: PAIRING (open to any phone) came back.
+static void test_months_of_uptime_never_reopen_pairing_or_lose_the_clock(void)
+{
+    g_cfg = hb_cfg_default;
+    const uint32_t epoch = 1795400000u;
+    boot(HB_WAKE_POWERON, true, false, 3900, epoch);
+    uint32_t t0 = now;
+    for (int day = 1; day <= 60; day++) {
+        TEST_ASSERT_FALSE(run(86400000u, false));
+        TEST_ASSERT_TRUE(act.state != HB_ST_PAIRING);
+        TEST_ASSERT_TRUE(core.fx.kind != HB_FX_PAIR);
+    }
+    uint32_t want = epoch + 60u * 86400u + (now - t0 - 60u * 86400000u) / 1000u;
+    TEST_ASSERT_UINT32_WITHIN(1, want, hb_core_epoch(&core, now));
+    run(1000, false);
+    run(6000, true);  // and a 5 s hold still opens the window when asked
+    TEST_ASSERT_EQUAL_INT(HB_ST_PAIRING, act.state);
+}
+
+// Review R5: a crash, watchdog or brownout reset keeps the RTC core (port: RTC_NOINIT + magic) and starts
+// quietly: the queued heart survives, and no battery bar loads a weak cell into another brownout.
+static void test_reset_wake_keeps_the_outbox_and_starts_quietly(void)
+{
+    g_cfg = hb_cfg_default;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    run(3000, false);
+    tap(1);
+    TEST_ASSERT_EQUAL_UINT8(1, core.n_out);
+    uint64_t id = core.out[0].id;
+    boot(HB_WAKE_RESET, true, false, 3600, 0);
+    TEST_ASSERT_EQUAL_UINT8(1, core.n_out);
+    TEST_ASSERT_TRUE(core.out[0].id == id);
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_NONE, core.fx.kind);
+    path(HB_PATH_BLE);
+    TEST_ASSERT_TRUE(g_ups[g_n_ups - 1].id == id);
+}
+
+// Review R8: a 15 s hold flashes white and, once the button is up, asks the port for a factory reset.
+static void test_fifteen_second_hold_flashes_white_then_factory_resets(void)
+{
+    g_cfg = hb_cfg_default;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    run(3000, false);
+    run(15100, true);
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_RESET, core.fx.kind);
+    TEST_ASSERT_EQUAL_INT(0, g_factory);  // not while it is still held
+    run(2000, false);
+    TEST_ASSERT_EQUAL_INT(1, g_factory);
 }
 
 static void test_unknown_clock_never_sleeps_on_schedule(void)
@@ -762,7 +864,7 @@ static void test_battery_is_never_sampled_while_leds_are_lit(void)
 
 // ---- uplink acks and show dedupe (PROTOCOL.md 4) -----------------------------------------------------
 
-static void test_mood_waits_for_a_path_then_tries_the_other_after_5s(void)
+static void test_mood_waits_for_a_path_then_resends_backing_off_never_on_a_dead_path(void)
 {
     g_cfg = hb_cfg_default;
     boot(HB_WAKE_POWERON, true, false, 3900, 0);
@@ -776,19 +878,52 @@ static void test_mood_waits_for_a_path_then_tries_the_other_after_5s(void)
     TEST_ASSERT_TRUE(g_ups[0].k == HB_MOOD_HEART && g_ups[0].path == HB_PATH_BLE && g_ups[0].id == id);
     run(HB_ACK_MS - 100, false);
     TEST_ASSERT_EQUAL_INT(1, g_n_ups);
-    run(200, false);  // no `resp` from the phone in 5 s: the same id on WiFi
+    run(200, false);  // no `resp` in 5 s and no WiFi (none provisioned): the same id on BLE again, not on a dead path
     TEST_ASSERT_EQUAL_INT(2, g_n_ups);
-    TEST_ASSERT_TRUE(g_ups[1].k == HB_MOOD_HEART && g_ups[1].path == HB_PATH_WIFI && g_ups[1].id == id);
-    run(60000, false);  // no PUBACK either: parked, not resent every 5 s
+    TEST_ASSERT_TRUE(g_ups[1].path == HB_PATH_BLE && g_ups[1].id == id);
+    run(9800, false);
     TEST_ASSERT_EQUAL_INT(2, g_n_ups);
-    path(HB_PATH_WIFI);  // the next path report retries it
+    run(300, false);  // then after 10 s, 20 s, 40 s, then every 60 s
     TEST_ASSERT_EQUAL_INT(3, g_n_ups);
-    TEST_ASSERT_TRUE(g_ups[2].path == HB_PATH_WIFI && g_ups[2].id == id);
+    run(20000 + 40000 + 60000, false);
+    TEST_ASSERT_EQUAL_INT(6, g_n_ups);
+    path(HB_PATH_WIFI);  // a path report sends it at once on the new path
+    TEST_ASSERT_EQUAL_INT(7, g_n_ups);
+    TEST_ASSERT_TRUE(g_ups[6].path == HB_PATH_WIFI && g_ups[6].id == id);
     ack(id);
     TEST_ASSERT_EQUAL_UINT8(0, core.n_out);
-    run(60000, false);
-    TEST_ASSERT_EQUAL_INT(3, g_n_ups);
+    run(5 * 60000, false);
+    TEST_ASSERT_EQUAL_INT(7, g_n_ups);
 }
+
+// Review 2026-11-26 R1: the WiFi session dropped before the PUBACK and was back within 5 s. The mood used to
+// fail over to a BLE path that was not there and then sit parked for good on a healthy link.
+static void test_mood_whose_session_dropped_is_resent_on_the_healthy_link(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    wifi(true);
+    mqtt(true);
+    run(3000, false);
+    tap(1);
+    TEST_ASSERT_EQUAL_INT(1, g_n_ups);
+    uint64_t id = g_ups[0].id;
+    mqtt(false);  // the session drops before the PUBACK
+    run(HB_LINK_QUICK_MS, false);
+    wifi(true);
+    mqtt(true);  // and is back within the 5 s
+    run(60 * 60000, false);  // an hour on a healthy link
+    int resent = 0;
+    for (int i = 1; i < g_n_ups; i++) {
+        TEST_ASSERT_TRUE(g_ups[i].id == id && g_ups[i].path == HB_PATH_WIFI);
+        resent++;
+    }
+    TEST_ASSERT_TRUE(resent >= 1 && resent <= 70);  // resent, backing off to once a minute
+    ack(id);
+    TEST_ASSERT_EQUAL_UINT8(0, core.n_out);
+}
+
 
 static void test_ack_clears_only_its_own_mood(void)
 {
@@ -1033,9 +1168,9 @@ static void test_heart_tapped_offline_goes_out_on_connect_and_again_after_a_reco
     TEST_ASSERT_EQUAL_INT(1, g_n_ups);
     uint64_t id = g_ups[0].id;
     TEST_ASSERT_TRUE(g_ups[0].k == HB_MOOD_HEART && g_ups[0].path == HB_PATH_WIFI);
-    run(HB_ACK_MS + 100, false);  // no PUBACK: the other path (BLE, dropped by the M3 port), then parked
+    run(HB_ACK_MS + 100, false);  // no PUBACK and no BLE path: the same id on WiFi again, next in 10 s
     TEST_ASSERT_EQUAL_INT(2, g_n_ups);
-    TEST_ASSERT_TRUE(g_ups[1].id == id && g_ups[1].path == HB_PATH_BLE);
+    TEST_ASSERT_TRUE(g_ups[1].id == id && g_ups[1].path == HB_PATH_WIFI);
     run(HB_ACK_MS + 100, false);
     TEST_ASSERT_EQUAL_INT(2, g_n_ups);
     mqtt(false);
@@ -1227,6 +1362,353 @@ static void test_wire_downlinks_become_events_and_replies(void)
     TEST_ASSERT_EQUAL_UINT32(600, act.sleep_s);
 }
 
+// ---- M4: handover (PROTOCOL.md 4) and the BLE requests ---------------------------------------------
+
+static void ble_link(bool up)
+{
+    hb_ev_t e = {.type = HB_EV_BLE, .up = up};
+    step(&e);
+}
+
+static void phone(bool up)
+{
+    hb_ev_t e = {.type = HB_EV_PHONE, .up = up};
+    step(&e);
+}
+
+// Claimed, WiFi up, then the phone comes near and holds the BLE path past net.near_hold_s.
+static void near_with_wifi_stopped(void)
+{
+    g_cfg = hb_cfg_default;
+    g_wifi = true;
+    boot(HB_WAKE_POWERON, true, false, 3900, 0);
+    wifi(true);
+    mqtt(true);
+    TEST_ASSERT_EQUAL_INT(HB_ST_AWAY, act.state);
+    path(HB_PATH_BLE);
+    TEST_ASSERT_EQUAL_INT(HB_ST_NEAR, act.state);
+    int n = g_n_links;
+    run(g_cfg.near_hold_s * 1000u - 100, false);
+    TEST_ASSERT_EQUAL_INT(n, g_n_links);  // WiFi stays up through the hold
+    run(200, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+    TEST_ASSERT_TRUE(core.near_off);
+    TEST_ASSERT_EQUAL_INT(HB_ST_NEAR, act.state);
+}
+
+static void test_near_held_stops_wifi_and_away_restarts_it_after_the_grace(void)
+{
+    near_with_wifi_stopped();
+    run(10 * 60000, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());  // stays off while near
+    ble_link(false);
+    TEST_ASSERT_EQUAL_INT(HB_ST_OFFLINE, act.state);
+    int n = g_n_links;
+    run(g_cfg.away_grace_s * 1000u - 100, false);
+    TEST_ASSERT_EQUAL_INT(n, g_n_links);  // the phone may just be out of range for a moment
+    run(200, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());  // the cached AP first
+    TEST_ASSERT_FALSE(core.near_off);
+    wifi(true);
+    mqtt(true);
+    TEST_ASSERT_EQUAL_INT(HB_ST_AWAY, act.state);
+
+    n = g_n_links;
+    path(HB_PATH_BLE);  // back near before the hold: WiFi keeps running
+    run(5000, false);
+    ble_link(false);
+    run(60000, false);
+    TEST_ASSERT_EQUAL_INT(n, g_n_links);
+    TEST_ASSERT_EQUAL_INT(HB_ST_AWAY, act.state);
+}
+
+static void test_pending_uplink_skips_the_grace(void)
+{
+    near_with_wifi_stopped();
+    ble_link(false);
+    run(3000, false);
+    tap(1);  // a heart with no path: WiFi now, not in a minute
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());
+    TEST_ASSERT_TRUE(now - g_links[g_n_links - 1].t < 1000);
+    wifi(true);
+    mqtt(true);
+    TEST_ASSERT_EQUAL_INT(1, g_n_ups);
+    TEST_ASSERT_TRUE(g_ups[0].k == HB_MOOD_HEART && g_ups[0].path == HB_PATH_WIFI);
+}
+
+static void test_phone_upstream_down_starts_wifi_after_the_grace_keeping_ble(void)
+{
+    near_with_wifi_stopped();
+    phone(false);  // the phone lost its server: no BLE path, but the link stays
+    TEST_ASSERT_EQUAL_INT(HB_ST_OFFLINE, act.state);
+    TEST_ASSERT_TRUE(core.ble);
+    run(g_cfg.away_grace_s * 1000u + 100, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());
+    phone(true);  // its server is back: NEAR again at once, WiFi off after another hold
+    TEST_ASSERT_EQUAL_INT(HB_ST_NEAR, act.state);
+    run(g_cfg.near_hold_s * 1000u + 100, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+}
+
+// Review R12 / A1: a phone in Doze keeps its BLE link but its app stops talking (and its MQTT session may be gone
+// without a `link up:false`). After HB_PHONE_SILENT_MS of silence the beacon stops counting it as its path.
+static void test_silent_phone_in_doze_hands_back_to_wifi(void)
+{
+    near_with_wifi_stopped();
+    g_quiet_phone = true;
+    TEST_ASSERT_FALSE(run(HB_PHONE_SILENT_MS - 60000, false));
+    TEST_ASSERT_EQUAL_INT(HB_ST_NEAR, act.state);
+    TEST_ASSERT_FALSE(run(60000 + 1000, false));
+    TEST_ASSERT_TRUE(core.ble);  // the link itself stays
+    TEST_ASSERT_TRUE(act.state != HB_ST_NEAR);
+    TEST_ASSERT_FALSE(run(g_cfg.away_grace_s * 1000u + 1000, false));
+    TEST_ASSERT_FALSE(core.near_off);  // WiFi takes over
+    TEST_ASSERT_TRUE(core.link.st != HB_LS_OFF);
+    hb_ev_t e = {.type = HB_EV_PHONE, .up = true};  // the phone wakes and says hello: NEAR again
+    step(&e);
+    TEST_ASSERT_EQUAL_INT(HB_ST_NEAR, act.state);
+}
+
+static void test_a_wifi_change_is_tried_at_once_even_near(void)
+{
+    near_with_wifi_stopped();
+    hb_ev_t e = {.type = HB_EV_PROV, .up = true};
+    step(&e);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());
+    TEST_ASSERT_FALSE(core.near_off);
+    run(g_cfg.near_hold_s * 1000u + 100, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());  // near: off again after the hold
+
+    e.up = false;  // the last network forgotten: no WiFi to start, ever
+    step(&e);
+    ble_link(false);
+    run(10 * 60000, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_DOWN, last_link());
+}
+
+// A NEAR phone that stops acking (its server link died without saying so): WiFi, stopped by NEAR, comes back
+// for the mood.
+static void test_unacked_ble_mood_brings_back_the_wifi_near_stopped(void)
+{
+    near_with_wifi_stopped();
+    tap(1);
+    int n = g_n_ups;
+    TEST_ASSERT_EQUAL_INT(HB_PATH_BLE, g_ups[n - 1].path);
+    run(HB_ACK_MS + 100, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_LINK_FAST, last_link());  // WiFi started for it
+    wifi(true);
+    mqtt(true);
+    run(HB_ACK_MS * 2 + 100, false);  // the next retry goes on the WiFi that is now live
+    TEST_ASSERT_EQUAL_INT(HB_PATH_WIFI, g_ups[g_n_ups - 1].path);
+}
+
+static int ble_rx(const char *json)
+{
+    int before = g_n_pubs;
+    hb_wire_ble_rx(&core, &g_x, json, strlen(json), now, &g_rx, cap, NULL);
+    if (g_rx.has_ev) {
+        step(&g_rx.ev);
+    }
+    return g_n_pubs - before;
+}
+
+// The last publish as a resp to re: returns its err ("" when ok).
+static const char *resp_to(const char *re)
+{
+    static char err[32];
+    hb_msg_t m;
+    TEST_ASSERT_EQUAL_INT(HB_MSG_OK, hb_msg_decode(g_pubs[g_n_pubs - 1].json, strlen(g_pubs[g_n_pubs - 1].json), &m));
+    TEST_ASSERT_EQUAL_STRING("resp", m.t);
+    TEST_ASSERT_EQUAL_STRING(re, jstr(m.root, "re"));
+    bool ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(m.root, "ok"));
+    snprintf(err, sizeof err, "%s", ok ? "" : jstr(m.root, "err"));
+    hb_msg_free(&m);
+    return err;
+}
+
+static void test_wire_ble_answers_on_ble_and_the_phone_drives_the_path(void)
+{
+    connected();
+    run(5000, false);
+    ble_link(true);
+    g_n_pubs = 0;
+    TEST_ASSERT_EQUAL_INT(1, ble_rx("{\"v\":1,\"t\":\"get\",\"id\":\"00000000000000c1\",\"ts\":0,\"what\":\"info\"}"));
+    TEST_ASSERT_EQUAL_STRING("", resp_to("00000000000000c1"));
+    TEST_ASSERT_EQUAL_INT(HB_PATH_BLE, g_pubs[0].path);  // answered where it was asked
+    TEST_ASSERT_EQUAL_INT(HB_ST_AWAY, act.state);         // no `link up` yet
+
+    TEST_ASSERT_EQUAL_INT(2, ble_rx("{\"v\":1,\"t\":\"link\",\"id\":\"00000000000000c2\",\"ts\":0,\"up\":true}"));
+    TEST_ASSERT_EQUAL_INT(HB_ST_NEAR, act.state);  // state and tele go out on the new path, as on a connect
+    TEST_ASSERT_TRUE(strstr(g_pubs[1].json, "\"t\":\"state\"") && strstr(g_pubs[1].json, "\"path\":\"ble\""));
+    TEST_ASSERT_TRUE(strstr(g_pubs[2].json, "\"t\":\"tele\"") != NULL);
+    TEST_ASSERT_EQUAL_INT(HB_PATH_BLE, g_pubs[1].path);
+    TEST_ASSERT_EQUAL_INT(HB_PATH_BLE, g_pubs[2].path);
+    // a new app session on the same connection says `link up` again: it gets the state and tele too
+    TEST_ASSERT_EQUAL_INT(2, ble_rx("{\"v\":1,\"t\":\"link\",\"id\":\"00000000000000c7\",\"ts\":0,\"up\":true}"));
+
+    run(3000, false);
+    tap(1);
+    uint64_t id = g_ups[g_n_ups - 1].id;
+    TEST_ASSERT_EQUAL_INT(HB_PATH_BLE, g_ups[g_n_ups - 1].path);
+    char ack[160];
+    char ids[HB_ID_LEN + 1];
+    hb_id_format(id, ids);
+    snprintf(ack, sizeof ack, "{\"v\":1,\"t\":\"resp\",\"id\":\"00000000000000c3\",\"ts\":0,\"re\":\"%s\",\"ok\":true}", ids);
+    TEST_ASSERT_EQUAL_INT(0, ble_rx(ack));  // the phone's ack is not answered
+    TEST_ASSERT_EQUAL_UINT8(0, core.n_out);
+
+    TEST_ASSERT_EQUAL_INT(1, ble_rx("{\"v\":1,\"t\":\"link\",\"id\":\"00000000000000c4\",\"ts\":0,\"up\":false}"));
+    TEST_ASSERT_EQUAL_INT(HB_ST_AWAY, act.state);
+    TEST_ASSERT_EQUAL_INT(HB_PATH_WIFI, g_pubs[g_n_pubs - 1].path);
+
+    // the BLE-only requests do nothing over MQTT
+    const char *down = "hb/v1/d/HB-3FA2C1/down";
+    TEST_ASSERT_EQUAL_INT(0, rx(down, "{\"v\":1,\"t\":\"link\",\"id\":\"00000000000000c5\",\"ts\":0,\"up\":true}"));
+    TEST_ASSERT_EQUAL_INT(HB_ST_AWAY, act.state);
+    TEST_ASSERT_EQUAL_INT(0, rx(down, "{\"v\":1,\"t\":\"reset\",\"id\":\"00000000000000c6\",\"ts\":0,\"what\":\"factory\"}"));
+    TEST_ASSERT_EQUAL_INT(HB_CMD_NONE, g_rx.cmd.type);
+}
+
+static void test_wire_ble_requests_are_checked_before_the_port_sees_them(void)
+{
+    g_cfg = hb_cfg_default;
+    g_emit = true;
+    boot(HB_WAKE_POWERON, false, false, 3900, 0);  // unclaimed
+    ble_link(true);
+    g_n_pubs = 0;
+
+    TEST_ASSERT_EQUAL_INT(1, ble_rx("{\"v\":1,\"t\":\"claim\",\"id\":\"00000000000000d1\",\"ts\":0,\"host\":\"203.0.113.10\","
+                                    "\"mport\":70000,\"aport\":8443,\"user\":\"HB-3FA2C1\",\"pass\":\"p\"}"));
+    TEST_ASSERT_EQUAL_STRING("bad_mport", resp_to("00000000000000d1"));
+    TEST_ASSERT_EQUAL_INT(HB_CMD_NONE, g_rx.cmd.type);
+
+    TEST_ASSERT_EQUAL_INT(0, ble_rx("{\"v\":1,\"t\":\"claim\",\"id\":\"00000000000000d2\",\"ts\":0,\"host\":\"203.0.113.10\","
+                                    "\"mport\":8883,\"aport\":8443,\"user\":\"HB-3FA2C1\",\"pass\":\"secret\"}"));
+    TEST_ASSERT_EQUAL_INT(HB_CMD_CLAIM, g_rx.cmd.type);  // the port stores it and answers
+    TEST_ASSERT_EQUAL_STRING("00000000000000d2", g_rx.cmd.re);
+    TEST_ASSERT_EQUAL_STRING("203.0.113.10", g_rx.cmd.host);
+    TEST_ASSERT_EQUAL_UINT16(8883, g_rx.cmd.mport);
+    TEST_ASSERT_EQUAL_STRING("secret", g_rx.cmd.pass);
+    hb_ev_t e = {.type = HB_EV_CLAIMED};
+    step(&e);
+    TEST_ASSERT_EQUAL_INT(0, ble_rx("{\"v\":1,\"t\":\"claim\",\"id\":\"00000000000000d3\",\"ts\":0,\"host\":\"203.0.113.10\","
+                                    "\"mport\":8883,\"aport\":8443,\"user\":\"HB-3FA2C1\",\"pass\":\"other\"}"));
+    TEST_ASSERT_EQUAL_INT(HB_CMD_CLAIM, g_rx.cmd.type);  // a bonded phone may claim again (new credentials)
+    TEST_ASSERT_EQUAL_STRING("other", g_rx.cmd.pass);
+
+    TEST_ASSERT_EQUAL_INT(1, ble_rx("{\"v\":1,\"t\":\"wifi.set\",\"id\":\"00000000000000d4\",\"ts\":0,\"ssid\":\"Home\",\"psk\":\"short\"}"));
+    TEST_ASSERT_EQUAL_STRING("bad_psk", resp_to("00000000000000d4"));
+    TEST_ASSERT_EQUAL_INT(1, ble_rx("{\"v\":1,\"t\":\"wifi.set\",\"id\":\"00000000000000d5\",\"ts\":0,\"ssid\":\"\",\"psk\":\"\"}"));
+    TEST_ASSERT_EQUAL_STRING("bad_ssid", resp_to("00000000000000d5"));
+    TEST_ASSERT_EQUAL_INT(0, ble_rx("{\"v\":1,\"t\":\"wifi.set\",\"id\":\"00000000000000d6\",\"ts\":0,\"ssid\":\"Open\",\"psk\":\"\"}"));
+    TEST_ASSERT_EQUAL_INT(HB_CMD_WIFI_SET, g_rx.cmd.type);
+    TEST_ASSERT_EQUAL_STRING("Open", g_rx.cmd.ssid);
+    TEST_ASSERT_EQUAL_INT(0, ble_rx("{\"v\":1,\"t\":\"wifi.set\",\"id\":\"00000000000000d7\",\"ts\":0,\"ssid\":\"Home\",\"psk\":\"brass-heart-9\"}"));
+    TEST_ASSERT_EQUAL_INT(HB_CMD_WIFI_SET, g_rx.cmd.type);
+    TEST_ASSERT_EQUAL_INT(0, ble_rx("{\"v\":1,\"t\":\"wifi.scan\",\"id\":\"00000000000000d8\",\"ts\":0}"));
+    TEST_ASSERT_EQUAL_INT(HB_CMD_WIFI_SCAN, g_rx.cmd.type);
+    TEST_ASSERT_EQUAL_INT(1, ble_rx("{\"v\":1,\"t\":\"reset\",\"id\":\"00000000000000d9\",\"ts\":0,\"what\":\"all\"}"));
+    TEST_ASSERT_EQUAL_STRING("bad_what", resp_to("00000000000000d9"));
+    TEST_ASSERT_EQUAL_INT(0, ble_rx("{\"v\":1,\"t\":\"reset\",\"id\":\"00000000000000da\",\"ts\":0,\"what\":\"factory\"}"));
+    TEST_ASSERT_TRUE(g_rx.cmd.type == HB_CMD_RESET && g_rx.cmd.factory);
+    TEST_ASSERT_EQUAL_INT(1, ble_rx("{\"v\":1,\"t\":\"cfg\",\"id\":\"00000000000000db\",\"ts\":0,\"n\":5,\"b\":\"e30\",\"s\":\"AA\"}"));
+    TEST_ASSERT_TRUE(resp_to("00000000000000db")[0] != 0);  // refused, and told why
+    TEST_ASSERT_FALSE(g_rx.has_ev);
+    for (int i = 0; i < g_n_pubs; i++) {
+        TEST_ASSERT_EQUAL_INT(HB_PATH_BLE, g_pubs[i].path);
+    }
+}
+
+// ---- review ideas (I2-I7): custom and together, echo and celebrate, streak ember, presence, good morning ----
+
+static void test_custom_and_together_gestures_send_and_glow(void)
+{
+    connected();
+    run(5000, false);
+    g_n_pubs = 0;
+    run(100, true);  // tap
+    run(150, false);
+    run(900, true);  // then hold: the custom mood
+    run(800, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_CUSTOM, core.fx.kind);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(hb_cfg_default.mood_rgb, core.fx.rgb, 3);
+    TEST_ASSERT_TRUE(strstr(g_pubs[g_n_pubs - 1].json, "\"k\":\"custom\",\"rgb\":\"#ff4fa3\",\"pat\":0") != NULL);
+    run(8000, false);
+    run(3000, true);  // a 2-5 s hold: together
+    run(100, false);
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_BREATH, core.fx.kind);
+    TEST_ASSERT_EQUAL_UINT8(3, core.fx.arg);  // an invitation: 3 breaths
+    TEST_ASSERT_TRUE(strstr(g_pubs[g_n_pubs - 1].json, "\"k\":\"together\"") != NULL);
+}
+
+static void test_new_show_kinds_play_and_together_is_in_step(void)
+{
+    const char *down = "hb/v1/d/HB-3FA2C1/down";
+    connected();
+    run(5000, false);
+    rx(down, "{\"v\":1,\"t\":\"show\",\"id\":\"00000000000000e1\",\"ts\":0,\"k\":\"custom\",\"rgb\":\"#0a14c8\",\"pat\":1}");
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_CUSTOM, core.fx.kind);
+    TEST_ASSERT_EQUAL_UINT8(1, core.fx.arg);
+    TEST_ASSERT_TRUE(core.fx.rgb[0] == 10 && core.fx.rgb[1] == 20 && core.fx.rgb[2] == 200);
+    rx(down, "{\"v\":1,\"t\":\"show\",\"id\":\"00000000000000e2\",\"ts\":0,\"k\":\"echo\"}");
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_ECHO, core.fx.kind);
+    rx(down, "{\"v\":1,\"t\":\"show\",\"id\":\"00000000000000e3\",\"ts\":0,\"k\":\"celebrate\"}");
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_CELEBRATE, core.fx.kind);
+    // synced together: the breath phase is set by the shared `at`, so two beacons with the same clock agree
+    char msg[200];
+    uint32_t at = hb_core_epoch(&core, now) - 7;
+    snprintf(msg, sizeof msg, "{\"v\":1,\"t\":\"show\",\"id\":\"00000000000000e4\",\"ts\":0,\"k\":\"together\",\"at\":%lu}",
+             (unsigned long)at);
+    rx(down, msg);
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_BREATH, core.fx.kind);
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_BREATHS, core.fx.arg);
+    uint32_t phase = ((hb_core_epoch(&core, now) - at) * 1000u + (now - core.ms0) % 1000u) % HB_FX_BREATH_MS;
+    TEST_ASSERT_EQUAL_UINT32(phase, now - core.fx.t0);
+}
+
+static void test_streak_ember_and_partner_presence_light_idle_pixels(void)
+{
+    const char *down = "hb/v1/d/HB-3FA2C1/down";
+    connected();
+    run(6000, false);  // the boot bar is over: dark
+    TEST_ASSERT_EQUAL_UINT8(0, core.led[0][0]);
+    rx(down, "{\"v\":1,\"t\":\"streak\",\"id\":\"00000000000000f1\",\"ts\":0,\"n\":4}");
+    run(100, false);
+    TEST_ASSERT_EQUAL_UINT16(4, core.streak);
+    TEST_ASSERT_TRUE(core.led[0][0] > 0 && core.led[4][0] == 0);  // the ember at the tip
+    rx(down, "{\"v\":1,\"t\":\"presence\",\"id\":\"00000000000000f2\",\"ts\":0,\"uid\":\"bob\",\"near\":true}");
+    run(100, false);
+    TEST_ASSERT_EQUAL_UINT8(0, core.led[4][0]);  // led.presence is off by default
+    core.cfg.presence = true;
+    run(100, false);
+    TEST_ASSERT_TRUE(core.led[4][0] > 0);
+    hb_ev_t e = {.type = HB_EV_SLEEP, .for_s = 600};  // never into a deep sleep lit
+    step(&e);
+    TEST_ASSERT_TRUE(run(10000, false));
+    TEST_ASSERT_EQUAL_UINT8(0, core.led[0][0] | core.led[4][0]);
+}
+
+static void test_good_morning_replays_last_evening_heart_once_softly(void)
+{
+    const char *down = "hb/v1/d/HB-3FA2C1/down";
+    connected();
+    run(5000, false);
+    rx(down, "{\"v\":1,\"t\":\"show\",\"id\":\"00000000000000a7\",\"ts\":0,\"k\":\"sorry\"}");
+    run(5000, false);
+    hb_ev_t e = {.type = HB_EV_SLEEP, .for_s = 3600};
+    step(&e);
+    TEST_ASSERT_TRUE(run(10000, false));
+    boot(HB_WAKE_TIMER, true, false, 3900, EPOCH0);
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_SORRY, core.fx.kind);
+    TEST_ASSERT_EQUAL_UINT8(HB_GOOD_MORNING_LEVEL, core.fx.level);
+    e = (hb_ev_t){.type = HB_EV_SLEEP, .for_s = 3600};
+    run(5000, false);
+    step(&e);
+    TEST_ASSERT_TRUE(run(10000, false));
+    boot(HB_WAKE_TIMER, true, false, 3900, EPOCH0);  // once only
+    TEST_ASSERT_EQUAL_UINT8(HB_FX_NONE, core.fx.kind);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1256,12 +1738,16 @@ int main(void)
     RUN_TEST(test_nap_timer_wake_checks_in_then_naps_again);
     RUN_TEST(test_schedule_off_sleeps_until_next_start);
     RUN_TEST(test_button_wake_out_of_hours_stays_up_five_minutes);
+    RUN_TEST(test_months_of_uptime_never_reopen_pairing_or_lose_the_clock);
+    RUN_TEST(test_reset_wake_keeps_the_outbox_and_starts_quietly);
+    RUN_TEST(test_fifteen_second_hold_flashes_white_then_factory_resets);
     RUN_TEST(test_unknown_clock_never_sleeps_on_schedule);
     RUN_TEST(test_sleep_command_and_tap_cancels_pending_sleep);
     RUN_TEST(test_lowbatt_sleeps_button_only_and_rechecks_on_wake);
     RUN_TEST(test_draining_battery_warns_once_then_lowbatt);
     RUN_TEST(test_battery_is_never_sampled_while_leds_are_lit);
-    RUN_TEST(test_mood_waits_for_a_path_then_tries_the_other_after_5s);
+    RUN_TEST(test_mood_waits_for_a_path_then_resends_backing_off_never_on_a_dead_path);
+    RUN_TEST(test_mood_whose_session_dropped_is_resent_on_the_healthy_link);
     RUN_TEST(test_ack_clears_only_its_own_mood);
     RUN_TEST(test_outbox_keeps_the_newest_four_with_distinct_ids);
     RUN_TEST(test_unacked_mood_survives_deep_sleep_and_goes_out_on_the_first_path);
@@ -1275,5 +1761,17 @@ int main(void)
     RUN_TEST(test_config_use_wifi_stops_and_restarts_the_link);
     RUN_TEST(test_wire_connect_publishes_state_and_tele_then_a_tap_publishes_the_mood);
     RUN_TEST(test_wire_downlinks_become_events_and_replies);
+    RUN_TEST(test_near_held_stops_wifi_and_away_restarts_it_after_the_grace);
+    RUN_TEST(test_pending_uplink_skips_the_grace);
+    RUN_TEST(test_phone_upstream_down_starts_wifi_after_the_grace_keeping_ble);
+    RUN_TEST(test_a_wifi_change_is_tried_at_once_even_near);
+    RUN_TEST(test_silent_phone_in_doze_hands_back_to_wifi);
+    RUN_TEST(test_unacked_ble_mood_brings_back_the_wifi_near_stopped);
+    RUN_TEST(test_wire_ble_answers_on_ble_and_the_phone_drives_the_path);
+    RUN_TEST(test_wire_ble_requests_are_checked_before_the_port_sees_them);
+    RUN_TEST(test_custom_and_together_gestures_send_and_glow);
+    RUN_TEST(test_new_show_kinds_play_and_together_is_in_step);
+    RUN_TEST(test_streak_ember_and_partner_presence_light_idle_pixels);
+    RUN_TEST(test_good_morning_replays_last_evening_heart_once_softly);
     return UNITY_END();
 }

@@ -18,6 +18,9 @@ typedef struct {
     uint16_t api;            // srv.api
     char name[33];           // name, UTF-8
     uint8_t bright;          // led.bright, percent 0..100
+    bool presence;           // led.presence: a faint pixel while another member's phone is near their beacon
+    uint8_t mood_rgb[3];     // mood.rgb: the custom mood's colour
+    uint8_t mood_pat;        // mood.pat: 0 = 3 pulses, 1 = 3 slow breaths
     bool sched_on;           // sched.on
     int16_t tz_min;          // sched.tz, minutes east of UTC
     uint8_t days;            // sched.days, bit 0 = Monday .. bit 6 = Sunday

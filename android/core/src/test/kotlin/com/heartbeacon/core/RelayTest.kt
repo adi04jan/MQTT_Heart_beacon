@@ -143,7 +143,7 @@ class RelayTest {
     @Test fun noPubackIn5sMarksServerDeadAndResendsSameId() {
         engine.bleChanged(true, 0)
         engine.serverChanged(true, 0).forEach { if (it is RelayOut.Publish) engine.published(it.id, 0) }
-        val first = engine.sendMood("heart", 1_000).single() as RelayOut.Publish
+        val first = engine.sendMood("heart", 1_000).filterIsInstance<RelayOut.Publish>().single() // + the own glow
         assertTrue(engine.tick(5_999).isEmpty())
         val out = engine.tick(6_000)
         assertEquals(RelayOut.ReconnectServer, out[0])
@@ -152,6 +152,22 @@ class RelayTest {
         val again = engine.serverChanged(true, 7_000).filterIsInstance<RelayOut.Publish>().last()
         assertEquals(first.id, again.id)
         assertTrue(first.payload.contentEquals(again.payload))
+    }
+
+    @Test fun watchdogBacksOffOnALinkThatStaysSlow() {
+        engine.serverChanged(true, 0).forEach { if (it is RelayOut.Publish) engine.published(it.id, 0) }
+        engine.sendMood("heart", 0)
+        assertEquals(RelayOut.ReconnectServer, engine.tick(5_000).first()) // 5 s
+        engine.serverChanged(true, 6_000) // the same mood again, still no PUBACK
+        assertTrue(engine.tick(6_000 + 14_999).none { it == RelayOut.ReconnectServer })
+        assertEquals(RelayOut.ReconnectServer, engine.tick(6_000 + 15_000).first()) // then 15 s
+        val again = engine.serverChanged(true, 30_000).filterIsInstance<RelayOut.Publish>()
+        assertTrue(engine.tick(30_000 + 59_999).none { it == RelayOut.ReconnectServer })
+        assertEquals(RelayOut.ReconnectServer, engine.tick(30_000 + 60_000).first()) // then 60 s
+        engine.serverChanged(true, 100_000).filterIsInstance<RelayOut.Publish>().forEach { engine.published(it.id, 100_100) }
+        engine.sendMood("sorry", 200_000)
+        assertEquals(RelayOut.ReconnectServer, engine.tick(205_000).first()) // a PUBACK resets it to 5 s
+        assertTrue(again.isNotEmpty())
     }
 
     @Test fun pubackStopsTheTimer() {
@@ -203,6 +219,34 @@ class RelayTest {
         assertTrue(framesFromBeacon(mood, 6, 0).isEmpty()) // queued: the beacon's 5 s rule takes WiFi
         val relay = engine.serverChanged(true, 9_000).filterIsInstance<RelayOut.Publish>().last()
         assertEquals("00000000000000d1", toBeacon(engine.published(relay.id, 9_500)).single().body["re"]!!.jsonPrimitive.content)
+    }
+
+    @Test fun ownMoodAlsoGlowsTheNearBeaconAndItsShownStaysHere() {
+        engine.serverChanged(true, 0)
+        engine.bleChanged(true, 0)
+        val out = engine.sendMood("sorry", 2_000, id = "00000000000000e1")
+        val show = toBeacon(out).single()
+        assertEquals("show", show.t)
+        assertEquals("00000000000000e1", show.id) // the mood's id: the beacon plays it once whatever else arrives
+        assertEquals("sorry", show.body["k"]!!.jsonPrimitive.content)
+        assertEquals("mood", published(out).single().t)
+        // its `shown` is our own glow, not a delivery: nothing goes to the router
+        assertTrue(framesFromBeacon(beaconMsg("shown", "00000000000000e1"), 3, 2_100).isEmpty())
+        // a `shown` for a router delivery is still relayed
+        assertEquals("relay", published(framesFromBeacon(beaconMsg("shown", "00000000000000e2"), 4, 2_200)).single().t)
+
+        engine.bleChanged(false, 3_000) // away: the router's path only
+        assertTrue(toBeacon(engine.sendMood("heart", 3_100)).isEmpty())
+    }
+
+    @Test fun nearBeaconHearsFromThePhoneEveryFourMinutes() {
+        engine.bleChanged(true, 0) // `time` on connect
+        assertTrue(toBeacon(engine.tick(RelayEngine.TIME_EVERY_MS - 1)).isEmpty())
+        val beat = toBeacon(engine.tick(RelayEngine.TIME_EVERY_MS)).single()
+        assertEquals("time", beat.t) // the beacon's sign of life (firmware HB_PHONE_SILENT_MS)
+        assertTrue(toBeacon(engine.tick(RelayEngine.TIME_EVERY_MS + 1_000)).isEmpty())
+        engine.bleChanged(false, RelayEngine.TIME_EVERY_MS + 2_000)
+        assertTrue(toBeacon(engine.tick(3 * RelayEngine.TIME_EVERY_MS)).isEmpty()) // no link, nothing to say
     }
 
     @Test fun appMessagesAndLostBleGetNoAck() {

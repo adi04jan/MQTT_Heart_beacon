@@ -171,6 +171,8 @@ fun moodColor(m: Mood, onLight: Boolean = false): Color = when (m) {
     Mood.HEART -> if (onLight) Color(0xFFC81E2B) else Color(250, 52, 60)
     Mood.SORRY -> if (onLight) Color(0xFFB85C00) else Color(235, 161, 23)
     Mood.ANNOY -> if (onLight) Color(0xFF00757A) else Color(23, 231, 235)
+    Mood.CUSTOM -> if (onLight) Color(0xFFC2186B) else Color(255, 79, 163)
+    Mood.TOGETHER -> if (onLight) Color(0xFFB0204F) else Color(255, 40, 90)
 }
 
 @Composable

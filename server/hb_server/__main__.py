@@ -45,6 +45,7 @@ def main(argv=None) -> None:
         router_hash=auth.mosq_hash(router_pass),
         fw_dir=env.get("HB_FW_DIR", "/var/lib/hb/fw"),
         reload=auth.reload_broker,
+        tls_cert=env.get("HB_TLS_CERT", "/etc/hb/leaf.crt"),
     )
     if args.cmd == "adduser":
         print(api.add_user(ctx, args.uid, args.name, args.circle))
@@ -58,6 +59,9 @@ def main(argv=None) -> None:
     from .admin import create_admin
     from .router import Glue
 
+    left = api.cert_days_left(ctx.tls_cert, ctx.clock())
+    if left is not None and left < api.CERT_WARN_DAYS:
+        print(f"WARNING: TLS leaf {ctx.tls_cert} expires in {left} days: renew it (deploy/RUNBOOK.md)", flush=True)
     api.sync_broker(ctx)  # the router's password must be in passwd before it connects
     glue = Glue(ctx.db, "127.0.0.1", int(env.get("HB_MQTT_LOCAL_PORT", "1884")), router_pass)
     ctx.publish, ctx.refresh = glue.publish, glue.refresh

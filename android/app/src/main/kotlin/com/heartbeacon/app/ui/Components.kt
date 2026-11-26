@@ -182,6 +182,7 @@ fun MoodIcon(mood: Mood, tint: Color, size: Dp = 20.dp) {
         Mood.HEART -> R.drawable.ic_heart
         Mood.SORRY -> R.drawable.ic_sorry
         Mood.ANNOY -> R.drawable.ic_poke
+        Mood.CUSTOM, Mood.TOGETHER -> R.drawable.ic_heart
     }
     Icon(painterResource(res), contentDescription = null, tint = tint, modifier = Modifier.size(size))
 }

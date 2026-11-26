@@ -216,7 +216,7 @@ Signed by the server, published retained on `d/{did}/cfg`; the phone gets the si
   "led": {"bright": 60},
   "sched": {"on": true, "tz": 330, "days": "1111100", "start": "09:00", "stop": "19:00"},
   "pwr": {"idle_nap_min": 0, "nap_wake_min": 15, "batt_low_mv": 3450, "batt_off_mv": 3300, "batt_cal_ppm": 0},
-  "ble": {"adv_fast_ms": 100, "adv_fast_s": 30, "adv_slow_ms": 500, "conn_ms": 500, "latency": 3, "sup_ms": 6000},
+  "ble": {"adv_fast_ms": 100, "adv_fast_s": 30, "adv_slow_ms": 500, "conn_ms": 180, "latency": 0, "sup_ms": 6000},
   "net": {"use_wifi": true, "near_hold_s": 30, "away_grace_s": 60, "tele_min": 30},
   "fw": {"ver": "2.0.0", "path": "/fw/hb-2.0.0.bin", "sha256": "", "min_mv": 3700}
 }
@@ -295,7 +295,7 @@ Signed by the server, published retained on `d/{did}/cfg`; the phone gets the si
 | `fw/test/host/` | CMake + ctest + vendored Unity, `-Wall -Wextra -Werror` (rig copied from `AI-Notes-recorder/firmware/test/host/CMakeLists.txt`) | yes |
 | `fw/sim/` | `hb_sim`: the same `hb_core` objects behind a line-based TCP socket (events in, actions out, time injected). A pytest harness pumps its MQTT actions to a local Mosquitto and its BLE frames to the app's TCP link seam (seam idea from `android/sync/.../TcpDeviceLink.kt` and `:sync:simTest`). The reference simulator is a Python re-implementation; this one is not. | yes |
 
-Partition table: stock arduino-esp32 4 MB default, unchanged (two 1.25 MB app slots), so a v1 unit can take v2 over the air. Build fails above 1.18 MB. The spare `spiffs` area is left alone.
+Partition table (changed 2026-11-26, the user dropped v1 compatibility): our own 4 MB layout, two 1.9 MB OTA slots, no SPIFFS (`fw/partitions.csv`); the build fails above 1.9 MB. v1 units move to v2 by one USB flash, not by v1 OTA.
 
 v1 defects and where each is designed out:
 

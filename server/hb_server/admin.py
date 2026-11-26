@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -153,7 +154,13 @@ def create_admin(ctx: api.Ctx) -> FastAPI:
                          "wake": st.get("wake", 0), "mv": tele.get("mv"), "pct": tele.get("pct"),
                          "fw": tele.get("fw", ""),
                          "name": json.loads(r["cfg"])["name"] if r["cfg"] else ""})
-        return tpl.TemplateResponse(request, "devices.html", {"devices": rows, "users": users(), **extra},
+        cert_left = api.cert_days_left(ctx.tls_cert, ctx.clock()) if ctx.tls_cert else None
+        cert_warn = cert_left if cert_left is not None and cert_left < api.CERT_WARN_DAYS else None
+        anniv = {r["key"][len("anniv:"):]: r["value"] for r in db.q("SELECT key, value FROM setting WHERE key LIKE 'anniv:%'")}
+        circles = sorted({u["circle"] for u in users()})
+        return tpl.TemplateResponse(request, "devices.html",
+                                    {"devices": rows, "users": users(), "cert_warn": cert_warn, "anniv": anniv,
+                                     "circles": circles, **extra},
                                     status_code=400 if extra.get("error") or extra.get("user_error") else 200)
 
     @app.get("/")
@@ -169,6 +176,19 @@ def create_admin(ctx: api.Ctx) -> FastAPI:
         except ValueError as e:
             return devices_page(request, error=str(e), form=dict(f))
         return RedirectResponse(f"/d/{did}", status_code=303)
+
+    @app.post("/anniv")
+    async def do_anniv(request: Request):
+        """A circle's anniversary (review I9): every beacon in it plays `celebrate` at that minute, once a year."""
+        f = await request.form()
+        circle, when = f.get("circle", "").strip(), f.get("when", "").strip()
+        if not re.fullmatch(r"(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01]) ([01][0-9]|2[0-3]):[0-5][0-9]", when) and when:
+            return devices_page(request, user_error="Anniversary: MM-DD HH:MM, e.g. 02-14 09:00 (IST).")
+        if when:
+            db.x("INSERT OR REPLACE INTO setting VALUES (?, ?)", (f"anniv:{circle}", when))
+        else:
+            db.x("DELETE FROM setting WHERE key = ?", (f"anniv:{circle}",))
+        return RedirectResponse("/", status_code=303)
 
     @app.post("/users")
     async def do_add_user(request: Request):

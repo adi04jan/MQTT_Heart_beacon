@@ -26,6 +26,9 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -142,6 +145,7 @@ private const val TAKE_BACK_MS = 1_500L
 /** A mood that came while the app was closed plays once on opening if it is this recent (the router's window). */
 private const val REPLAY_MS = 24 * 3_600_000L
 private const val PLAYED = "played"
+private const val COACHED = "coached"  // the first send happened: no more "tap the heart" tag
 
 // Cloth under a soft overhead light: a pool where the beacon stands, the cloth's grain, falling off beyond.
 private const val FELT = """
@@ -207,6 +211,8 @@ fun HeartStage(
     onSend: (Mood) -> Unit,
     onAdd: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Review U1: the brightness slider is being dragged; the cage lights steadily at that brightness. */
+    previewing: Boolean = false,
     top: @Composable () -> Unit,
 ) {
     val renderer = remember { CageRenderer() }
@@ -242,7 +248,8 @@ fun HeartStage(
     }
 
     fun play(now: Long) {
-        twin.playing?.let { effectUntil = it.startMs + (Fx.durationMs(it.kind, it.arg) ?: 0L) }
+        // PAIR has no end: it pulses until the bond is back (the re-pair plate)
+        twin.playing?.let { effectUntil = it.startMs + (Fx.durationMs(it.kind, it.arg) ?: (24 * 3600_000L)) }
         clock = now
     }
 
@@ -260,7 +267,8 @@ fun HeartStage(
     // mood never plays twice on opening.
     fun arrive(e: Event, up: Boolean) {
         val now = SystemClock.uptimeMillis()
-        twin.mood(e.mood, up, now)
+        if (up && !still) heartbeat(ctx, e.mood)  // review U6: felt as well as seen
+        twin.mood(e.mood, up, now, e.rgb)
         waiting = twin.waiting
         play(now)
         prefs.edit { putString(PLAYED, e.id) }
@@ -294,6 +302,38 @@ fun HeartStage(
         }
     }
 
+    // The beacon refused this phone's bond (review U3): the twin pulses blue like the real pairing window.
+    val needsPair = beacon?.needsPair == true
+    LaunchedEffect(needsPair) {
+        if (needsPair) {
+            twin.pair(SystemClock.uptimeMillis())
+            play(SystemClock.uptimeMillis())
+        }
+    }
+
+    // The idle overlay the beacon shows: the streak's ember, the partner's presence (review I5, I7). Redrawn once
+    // when either changes, as the frame clock runs only while an effect plays.
+    val ember = (beacon?.streak ?: 0) > 0
+    val partner = beacon?.partnerNear == true
+    LaunchedEffect(ember, partner) {
+        twin.ember = ember
+        twin.presence = partner
+        play(SystemClock.uptimeMillis())
+    }
+    // One of your hearts just played on the other desk: the soft brass echo, as your beacon plays it (review I2).
+    // Marks already shown when the app opens are history, not news.
+    val echoed = remember { HashSet<String>() }
+    var echoPrimed by remember { mutableStateOf(false) }
+    LaunchedEffect(events) {
+        for (e in events) {
+            if (e.from == null && e.mark == Mark.SHOWN && echoed.add(e.id) && echoPrimed && awake) {
+                twin.echo(SystemClock.uptimeMillis())
+                play(SystemClock.uptimeMillis())
+            }
+        }
+        echoPrimed = true
+    }
+
     // Frame clock only while an LED effect plays; pose, squash and wave animate through their own state.
     LaunchedEffect(Unit) {
         while (true) {
@@ -304,8 +344,15 @@ fun HeartStage(
         }
     }
 
+    var coached by remember { mutableStateOf(prefs.getBoolean(COACHED, false)) }
+    if (!coached && events.any { it.from == null }) coached = true  // has sent before (history): no tip
+
     fun fire(m: Mood) {
         onSend(m)
+        if (!coached) {
+            coached = true
+            prefs.edit { putBoolean(COACHED, true) }
+        }
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         sentFlash = m
         waveMood = m
@@ -379,6 +426,22 @@ fun HeartStage(
             val center = Offset(wPx * 0.60f, hPx * 0.455f)
             fun inside(p: Offset) = hypot(p.x - center.x, p.y - center.y) < halfWidth * 1.15f
 
+            // Review U8: a brass tag tied under the cage until the first send, then never again.
+            if (!coached && present) {
+                val d = LocalDensity.current
+                Text(
+                    "Tap the heart",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Stage.text,
+                    modifier = Modifier
+                        .offset { IntOffset((center.x - with(d) { 52.dp.toPx() }).toInt(), (center.y + halfWidth * 1.18f).toInt()) }
+                        .clip(RoundedCornerShape(4.dp))
+                        .border(1.dp, Stage.label, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                        .clearAndSetSemantics { contentDescription = "Tip: tap the heart to send a Heart" },
+                )
+            }
+
             val baseConfig = LocalViewConfiguration.current
             val holdConfig = remember(baseConfig) {
                 object : ViewConfiguration by baseConfig {
@@ -431,6 +494,7 @@ fun HeartStage(
                 ) {
                     val now = clock
                     twin.frame(now, 100, rgb)
+                    if (previewing) for (i in 0 until Fx.PIXELS) { rgb[i * 3] = 250; rgb[i * 3 + 1] = 0; rgb[i * 3 + 2] = 0 }
                     // The desk LEDs dim with the brightness setting; a screen needs a floor to stay readable.
                     val k = 0.62f + 0.38f * bright.coerceIn(5, 100) / 100f
                     for (i in rgb.indices) rgb[i] = (rgb[i] * k).toInt()
@@ -554,6 +618,11 @@ private fun Dashboard(b: Beacon, fmt: Format, modifier: Modifier) {
             }
         }
         Readout("Network") {
+            if (b.needsPair) {
+                Text("Pair again", style = Reading, color = Stage.warn)
+                Sub("Hold its button 5 s, then keep this phone close")
+                return@Readout
+            }
             when (b.presence) {
                 Presence.Near -> {
                     Text("Near", style = Reading, color = Stage.text)
@@ -566,12 +635,12 @@ private fun Dashboard(b: Beacon, fmt: Format, modifier: Modifier) {
                 else -> {
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text("Wi-Fi", style = Reading, color = Stage.text)
-                        b.rssi?.let {
+                        b.rssi?.takeIf { it < 0 }?.let {
                             Spacer(Modifier.width(10.dp))
                             Bars(it)
                         }
                     }
-                    b.rssi?.let { Sub("$it dBm") }
+                    b.rssi?.takeIf { it < 0 }?.let { Sub(signalWord(it)) }  // review U4: words here, the dBm in the beacon's settings
                 }
             }
         }
@@ -583,6 +652,12 @@ private fun Dashboard(b: Beacon, fmt: Format, modifier: Modifier) {
                     p.untilEpochMs?.let { Sub("Wakes ${fmt.clock(it)}") }
                 }
                 Presence.Offline -> Text("Unreachable", style = Reading, color = Stage.text2)
+            }
+        }
+        if (b.streak > 0) {  // review I5: the ember on the desk, in words
+            Readout("Streak") {
+                Text("${b.streak} ${if (b.streak == 1) "day" else "days"}", style = Reading, color = Stage.text)
+                Sub("A heart from each of you, every day")
             }
         }
     }
@@ -615,14 +690,21 @@ private fun Pips(pct: Int, stale: Boolean = false) {
 }
 
 /** Wi-Fi strength as four rising bars (>= -55, -65, -75, else one bar). */
+private fun beads(rssi: Int) = when { rssi >= -62 -> 3; rssi >= -75 -> 2; else -> 1 }
+
+private fun signalWord(rssi: Int) = when (beads(rssi)) { 3 -> "Strong signal"; 2 -> "Fair signal"; else -> "Weak signal" }
+
+/** Review U4: Wi-Fi strength as three solder beads, the cage's own joints, not a phone's bar graph. */
 @Composable
 private fun Bars(rssi: Int) {
-    val n = when { rssi >= -55 -> 4; rssi >= -65 -> 3; rssi >= -75 -> 2; else -> 1 }
-    Row(horizontalArrangement = Arrangement.spacedBy(2.5.dp), verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(bottom = 6.dp)) {
-        for (i in 0 until 4) {
+    val n = beads(rssi)
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(bottom = 8.dp)) {
+        for (i in 0 until 3) {
             Box(
-                Modifier.size(width = 4.dp, height = (6 + 3 * i).dp).clip(RoundedCornerShape(1.dp))
-                    .background(if (i < n) Stage.text else Stage.pipOff),
+                Modifier.size(7.dp).clip(CircleShape)
+                    .background(if (i < n) Stage.brass else Stage.pipOff)
+                    .border(0.5.dp, Stage.label.copy(alpha = 0.6f), CircleShape),
             )
         }
     }
@@ -711,8 +793,15 @@ private fun GestureKey(tapCount: Int, pending: Mood?, send: (Mood) -> Unit, batt
             val on by animateFloatAsState(if (tapCount == n || pending == m) 1f else 0f, tween(140), label = "key")
             val c = lerp(Stage.label, moodColor(m, Stage.light), on)
             Key("Send ${article(m)}", lerp(Stage.pipOff, c, on), onClick = { send(m) }) {
-                repeat(n) {
-                    Box(Modifier.padding(end = 3.dp).size(6.dp).clip(CircleShape).background(c))
+                when (m) {  // the button's gesture, drawn: pips are taps, a bar is a hold
+                    Mood.CUSTOM -> {
+                        Box(Modifier.padding(end = 3.dp).size(6.dp).clip(CircleShape).background(c))
+                        Box(Modifier.padding(end = 3.dp).size(width = 12.dp, height = 6.dp).clip(CircleShape).background(c))
+                    }
+                    Mood.TOGETHER -> Box(Modifier.padding(end = 3.dp).size(width = 30.dp, height = 6.dp).clip(CircleShape).background(c))
+                    else -> repeat(n) {
+                        Box(Modifier.padding(end = 3.dp).size(6.dp).clip(CircleShape).background(c))
+                    }
                 }
                 Spacer(Modifier.width(4.dp))
                 Text(label(m), style = MaterialTheme.typography.bodySmall, color = lerp(Stage.text2, Stage.text, on))
@@ -720,7 +809,7 @@ private fun GestureKey(tapCount: Int, pending: Mood?, send: (Mood) -> Unit, batt
         }
         if (battery != null) {
             Key("Show the battery", Stage.pipOff, onClick = battery) {
-                Box(Modifier.size(width = 16.dp, height = 6.dp).clip(CircleShape).background(Stage.label))
+                Box(Modifier.size(width = 11.dp, height = 6.dp).clip(CircleShape).background(Stage.label))  // a short hold
                 Spacer(Modifier.width(7.dp))
                 Text("Battery", style = MaterialTheme.typography.bodySmall, color = Stage.text2)
             }
@@ -748,6 +837,26 @@ private fun lerp(a: Color, b: Color, t: Float) = androidx.compose.ui.graphics.le
 
 private fun moodOf(n: Int) = when (n) { 1 -> Mood.HEART; 2 -> Mood.SORRY; else -> Mood.ANNOY }
 
-private fun label(m: Mood) = when (m) { Mood.HEART -> "Heart"; Mood.SORRY -> "Sorry"; Mood.ANNOY -> "Annoy" }
+private fun label(m: Mood) = when (m) {
+    Mood.HEART -> "Heart"; Mood.SORRY -> "Sorry"; Mood.ANNOY -> "Annoy"; Mood.CUSTOM -> "Colour"; Mood.TOGETHER -> "Together"
+}
 
-private fun article(m: Mood) = when (m) { Mood.HEART -> "a Heart"; Mood.SORRY -> "a Sorry"; Mood.ANNOY -> "an Annoy" }
+private fun article(m: Mood) = when (m) {
+    Mood.HEART -> "a Heart"; Mood.SORRY -> "a Sorry"; Mood.ANNOY -> "an Annoy"; Mood.CUSTOM -> "your colour"
+    Mood.TOGETHER -> "a Together"
+}
+
+/**
+ * A haptic heartbeat timed to the LED effect (review U6): a short tick at each pulse's peak (520 ms in, then every
+ * 1140 ms), a slow swell for a together. Touch-feedback usage, so the system's own haptics switch silences it.
+ */
+private fun heartbeat(ctx: Context, mood: Mood) {
+    val v = ctx.getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator ?: return
+    if (!v.hasVibrator()) return
+    val effect = if (mood == Mood.TOGETHER) {
+        android.os.VibrationEffect.createWaveform(longArrayOf(0, 2000), intArrayOf(0, 60), -1)
+    } else {
+        android.os.VibrationEffect.createWaveform(longArrayOf(520, 30, 1110, 30, 1110, 30), intArrayOf(0, 180, 0, 180, 0, 180), -1)
+    }
+    v.vibrate(effect, android.os.VibrationAttributes.createForUsage(android.os.VibrationAttributes.USAGE_TOUCH))
+}

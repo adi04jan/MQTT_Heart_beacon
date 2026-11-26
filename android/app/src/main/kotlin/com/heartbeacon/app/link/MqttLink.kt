@@ -1,5 +1,6 @@
 package com.heartbeacon.app.link
 
+import android.util.Log
 import org.eclipse.paho.mqttv5.client.IMqttToken
 import org.eclipse.paho.mqttv5.client.MqttActionListener
 import org.eclipse.paho.mqttv5.client.MqttAsyncClient
@@ -88,7 +89,20 @@ class MqttLink(
 
     fun publish(topic: String, payload: ByteArray, id: String) {
         runCatching { client.publish(topic, payload, 1, false, id, null) }
-            .onFailure { listener.onServer(false) } // not connected: the relay keeps it in its outbox
+            .onFailure {
+                Log.w(TAG, "publish $id refused: $it")
+                listener.onServer(false) // the relay keeps it in its outbox
+                reconnectSoon()
+            }
+    }
+
+    /**
+     * A refused publish or a protocol error: the session may look connected while being of no use, and with nothing
+     * left in flight the relay's PUBACK watchdog would never fire. Dial again in 2 s unless Paho already has.
+     */
+    private fun reconnectSoon() {
+        if (closed) return
+        runCatching { retry.schedule({ if (!closed && !client.isConnected) runCatching { client.reconnect() } }, 2, TimeUnit.SECONDS) }
     }
 
     /** The relay saw no PUBACK in time: drop the socket and dial again. */
@@ -113,18 +127,30 @@ class MqttLink(
             listener.onServer(true)
         }
 
-        override fun disconnected(r: MqttDisconnectResponse) = listener.onServer(false)
+        override fun disconnected(r: MqttDisconnectResponse) {
+            Log.w(TAG, "disconnected: ${r.reasonString ?: r.exception ?: r.returnCode}")
+            listener.onServer(false)
+        }
 
-        override fun mqttErrorOccurred(e: MqttException) = listener.onServer(false)
+        override fun mqttErrorOccurred(e: MqttException) {
+            Log.w(TAG, "error: $e")
+            listener.onServer(false)
+            reconnectSoon()
+        }
 
         override fun messageArrived(topic: String, message: MqttMessage) {
             if (topic == downTopic) listener.onMessage(message.payload)
         }
 
         override fun deliveryComplete(token: IMqttToken) {
+            Log.d(TAG, "puback ${token.userContext} rc ${token.reasonCodes?.joinToString()}")
             (token.userContext as? String)?.let(listener::onPublished)
         }
 
         override fun authPacketArrived(reasonCode: Int, properties: MqttProperties) = Unit
+    }
+
+    private companion object {
+        const val TAG = "MqttLink"
     }
 }

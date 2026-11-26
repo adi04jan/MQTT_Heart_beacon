@@ -245,7 +245,17 @@ class CageRenderer {
             order[k++] = key(z, i)
         }
         for (i in 0 until n) order[k++] = key(front[i] + 0.004f, r + i)
-        for (q in 0 until Q) order[k++] = key(quadDepth(q) + if (q >= LED0) 0.012f else if (q >= BOARD) 0.004f else 0f, r + n + q)
+        // The LEDs sit on the block's front face, so they never sort behind it: by centres alone, a turned face's
+        // centre passes the LEDs on its far side and hides them (one side of the ring went dark).
+        val mount = quadDepth(FRONT)
+        for (q in 0 until Q) {
+            val z = when {
+                q >= LED0 -> maxOf(quadDepth(q), mount) + 0.012f
+                q >= BOARD -> quadDepth(q) + 0.004f
+                else -> quadDepth(q)
+            }
+            order[k++] = key(z, r + n + q)
+        }
         order[k++] = key(quadDepth(BACK) - 0.012f, r + n + Q)
         for (w in 0 until WIRES) order[k++] = key(wz[w], r + n + Q + 1 + w)
         order.sort()
@@ -562,7 +572,7 @@ class CageRenderer {
         return ((h xor (h ushr 16)) and 0xFFFF) / 65535f
     }
 
-    private companion object {
+    internal companion object {
         const val CAM = 5.2f
         const val FACES = 6
         const val BACK = 4
@@ -576,8 +586,8 @@ class CageRenderer {
         const val ROD = 0.0205f
         const val LED_HALF = 0.056f
 
-        // How each LED sits, radians: glued by hand, none quite square.
-        val LED_TURN = floatArrayOf(0.05f, 0.62f, -0.35f, 0.5f, 0.16f, -0.08f, -0.6f, 0.26f, -0.5f)
+        // How each LED sits, radians: along the ring (its neighbours' chord, mod 90°), so pixel i and 9 - i mirror.
+        val LED_TURN = floatArrayOf(0f, -0.71f, 0.26f, -0.67f, 0.11f, -0.11f, 0.67f, -0.26f, 0.71f)
 
         // Key light (upper left, in front), its half vector with the view direction (0, 0, 1), and a cool fill from
         // the right and behind.

@@ -23,20 +23,21 @@ object Cage {
     val rodCount get() = rods.size / 2
 
     /**
-     * LED centres in chain order (pixel 0 first), xyz interleaved, from the front photo.
+     * LED centres in chain order (pixel 0 first), xyz interleaved: the front photo's ring, mirrored about x = 0
+     * (pixel i and 9 - i are a left/right pair, averaged).
      * ponytail: chain order is a guess (bottom tip, then clockwise up the left lobe); confirm with the battery bar
      * (hold the button: pixel 0 lights first) and reorder here.
      */
     val leds = floatArrayOf(
-        0.02f, -0.42f, 0.12f,
-        -0.31f, -0.24f, 0.12f,
-        -0.60f, 0.05f, 0.12f,
-        -0.54f, 0.47f, 0.12f,
-        -0.20f, 0.58f, 0.12f,
-        0.20f, 0.62f, 0.12f,
-        0.49f, 0.57f, 0.12f,
-        0.60f, 0.15f, 0.12f,
-        0.32f, -0.19f, 0.12f,
+        0f, -0.42f, 0.12f,
+        -0.32f, -0.22f, 0.12f,
+        -0.60f, 0.10f, 0.12f,
+        -0.52f, 0.52f, 0.12f,
+        -0.20f, 0.60f, 0.12f,
+        0.20f, 0.60f, 0.12f,
+        0.52f, 0.52f, 0.12f,
+        0.60f, 0.10f, 0.12f,
+        0.32f, -0.22f, 0.12f,
     )
 
     /** The dark core block (battery + boards): min and max corners. */

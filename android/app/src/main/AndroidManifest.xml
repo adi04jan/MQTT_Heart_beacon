@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- The plan's list, nothing more. No BLUETOOTH_SCAN and no location: CDM does the scan. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -40,6 +41,9 @@
             </intent-filter>
         </activity>
 
+        <receiver
+            android:name=".link.ReplyReceiver"
+            android:exported="false" />
         <service
             android:name=".link.BeaconService"
             android:exported="false"

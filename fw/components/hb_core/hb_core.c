@@ -8,6 +8,9 @@ const hb_cfg_t hb_cfg_default = {
     .mqtt = {8883},
     .api = 8443,
     .bright = 60,
+    .presence = false,
+    .mood_rgb = {0xff, 0x4f, 0xa3},  // "#ff4fa3"
+    .mood_pat = 0,
     .sched_on = false,
     .tz_min = 0,
     .days = 0x1f,  // "1111100": Monday to Friday
@@ -21,8 +24,8 @@ const hb_cfg_t hb_cfg_default = {
     .adv_fast_ms = 100,
     .adv_fast_s = 30,
     .adv_slow_ms = 500,
-    .conn_ms = 500,
-    .latency = 3,
+    .conn_ms = 180,  // review P3: a phone tap glows the beacon within ~0.2 s; the LED floor dwarfs the cost
+    .latency = 0,
     .sup_ms = 6000,
     .use_wifi = true,
     .near_hold_s = 30,
@@ -35,7 +38,31 @@ static const hb_fx_kind_t k_mood_fx[] = {
     [HB_MOOD_HEART] = HB_FX_HEART,
     [HB_MOOD_SORRY] = HB_FX_SORRY,
     [HB_MOOD_ANNOY] = HB_FX_ANNOY,
+    [HB_MOOD_CUSTOM] = HB_FX_CUSTOM,
+    [HB_MOOD_TOGETHER] = HB_FX_BREATH,
+    [HB_MOOD_ECHO] = HB_FX_ECHO,
+    [HB_MOOD_CELEBRATE] = HB_FX_CELEBRATE,
 };
+
+// Plays a mood or show kind. A custom one takes its colour from rgb/pat (the sender's, or ours for our own press);
+// together breathes 3 times as an invitation, 15 times when it is the shared one, in phase with `at`.
+static void play(hb_core_t *c, hb_mood_t k, const uint8_t rgb[3], uint8_t pat, uint32_t at, uint32_t now_ms)
+{
+    uint8_t arg = k == HB_MOOD_CUSTOM ? pat : k == HB_MOOD_TOGETHER ? (at ? HB_FX_BREATHS : 3) : 0;
+    uint32_t t0 = now_ms;
+    uint32_t epoch = hb_core_epoch(c, now_ms);
+    if (k == HB_MOOD_TOGETHER && at && epoch) {  // both beacons count breaths from the same epoch second
+        uint32_t ms = (epoch - at) * 1000u + (now_ms - c->ms0) % 1000u;
+        t0 = now_ms - ms % HB_FX_BREATH_MS;
+    }
+    hb_fx_start(&c->fx, k_mood_fx[k], arg, t0);
+    if (k == HB_MOOD_CUSTOM) {
+        memcpy(c->fx.rgb, rgb, 3);
+    }
+    if (k <= HB_MOOD_CUSTOM) {  // a heart, sorry, annoy or custom: the one the good-morning replay repeats
+        c->morning = c->fx;
+    }
+}
 
 uint32_t hb_core_epoch(const hb_core_t *c, uint32_t now_ms)
 {
@@ -83,26 +110,48 @@ static void queue_mood(hb_core_t *c, hb_mood_t k)
     c->out[c->n_out++] = (hb_pend_t){.id = hb_core_new_id(c), .k = (uint8_t)k, .path = HB_PATH_NONE};
 }
 
-// PROTOCOL.md 4: send a waiting mood on the live path; no ack in 5 s, the same id on the other path; no
-// ack there either, parked until the next path report (HB_EV_PATH).
+static bool ble_live(const hb_core_t *c);
+static void link_in(hb_core_t *c, hb_link_in_t in, uint32_t now_ms, hb_actions_t *out);
+
+static bool path_live(const hb_core_t *c, hb_path_t p)
+{
+    return p == HB_PATH_BLE ? ble_live(c) : p == HB_PATH_WIFI && c->link.st == HB_LS_UP;
+}
+
+// Resend spacing for a mood with no ack: 5 s (PROTOCOL.md 4), then 10, 20, 40, then every 60 s.
+static uint32_t ack_wait(uint8_t sends)
+{
+    return sends >= 5 ? 60000u : (uint32_t)HB_ACK_MS << (sends ? sends - 1 : 0);
+}
+
+// PROTOCOL.md 4: a waiting mood goes out on the live path. No ack in time: the other path if it is live (a
+// WiFi that NEAR stopped is started for it), else the same path again, backing off; nothing live: it waits
+// and goes out on the next path that comes up. It is never failed over to a path that is down.
 static void pump(hb_core_t *c, uint32_t now_ms, hb_actions_t *out)
 {
     for (uint8_t i = 0; i < c->n_out; i++) {
         hb_pend_t *p = &c->out[i];
-        hb_path_t to;
-        if (p->path == HB_PATH_NONE) {
-            to = c->path;
-        } else if (p->sends == 1 && hb_due(now_ms, p->due)) {
-            to = p->path == HB_PATH_BLE ? HB_PATH_WIFI : HB_PATH_BLE;
-        } else {
-            continue;
+        if (p->path != HB_PATH_NONE && !hb_due(now_ms, p->due)) {
+            continue;  // in flight
+        }
+        hb_path_t to = c->path;
+        if (p->path != HB_PATH_NONE) {
+            hb_path_t other = p->path == HB_PATH_BLE ? HB_PATH_WIFI : HB_PATH_BLE;
+            if (path_live(c, other)) {
+                to = other;
+            } else if (other == HB_PATH_WIFI && c->near_off && c->wifi_known && c->cfg.use_wifi) {
+                c->near_off = false;  // the phone is not acking: bring WiFi back for this mood
+                c->live_at = now_ms;  // and keep it up a full hold before NEAR may stop it again
+                link_in(c, HB_LI_START, now_ms, out);
+            }
         }
         if (to == HB_PATH_NONE) {
+            p->path = HB_PATH_NONE;
             continue;
         }
-        p->sends = p->path == HB_PATH_NONE ? 1 : 2;
+        p->sends += p->sends < UINT8_MAX;
         p->path = (uint8_t)to;
-        p->due = now_ms + HB_ACK_MS;
+        p->due = now_ms + ack_wait(p->sends);
         send_up(out, (hb_mood_t)p->k, to, p->id);
     }
 }
@@ -137,22 +186,25 @@ static void remember(hb_core_t *c, uint64_t id)
     }
 }
 
-// A path report retries the parked moods (sent on both paths without an ack) on the new path.
+// A path report: moods already backing off go out on it at once instead of at their next retry.
 static void set_path(hb_core_t *c, hb_path_t p, uint32_t now_ms)
 {
     c->path = p;
-    for (uint8_t i = 0; i < c->n_out; i++) {
-        hb_pend_t *m = &c->out[i];
-        if (m->sends == 2 && hb_due(now_ms, m->due)) {
-            m->path = HB_PATH_NONE;
-            m->sends = 0;
+    for (uint8_t i = 0; p != HB_PATH_NONE && i < c->n_out; i++) {
+        if (c->out[i].sends >= 2) {
+            c->out[i].due = now_ms;
         }
     }
 }
 
 static bool wifi_wanted(const hb_core_t *c)
 {
-    return c->wifi_known && c->cfg.use_wifi;
+    return c->wifi_known && c->cfg.use_wifi && !c->near_off;
+}
+
+static bool ble_live(const hb_core_t *c)
+{
+    return c->ble && c->phone;
 }
 
 // Feeds hb_link; the WiFi path is live exactly while the link is up (BLE, when live, stays the path).
@@ -170,8 +222,54 @@ static void link_in(hb_core_t *c, hb_link_in_t in, uint32_t now_ms, hb_actions_t
         }
         c->report = true;  // every connect reports state and tele (PROTOCOL.md 3), the router answers `time`
         c->tele_due = now_ms;
+        if (c->checkin) {  // NAP check-in: up now, stay long enough for the router to flush queued hearts
+            c->checkin = false;
+            c->nap_due = now_ms + HB_NAP_CHECKIN_MS;
+        }
     } else if (was && !up && c->path == HB_PATH_WIFI) {
         set_path(c, HB_PATH_NONE, now_ms);
+    }
+}
+
+// The BLE path is an encrypted link whose phone reports its server link up. Losing it (link gone, or the
+// phone's upstream down) falls back to WiFi if that is up, and arms the grace before a stopped WiFi restarts.
+static void ble_in(hb_core_t *c, bool ble, bool phone, uint32_t now_ms)
+{
+    bool was = ble_live(c);
+    c->ble = ble;
+    c->phone = ble && phone;
+    bool live = ble_live(c);
+    if (live == was) {
+        return;
+    }
+    if (live) {
+        c->live_at = now_ms;
+        set_path(c, HB_PATH_BLE, now_ms);
+        c->report = true;  // like a WiFi connect: state and tele for the phone to relay
+        c->tele_due = now_ms;
+    } else {
+        c->wifi_due = now_ms + c->cfg.away_grace_s * 1000u;
+        set_path(c, c->link.st == HB_LS_UP ? HB_PATH_WIFI : HB_PATH_NONE, now_ms);
+    }
+}
+
+// PROTOCOL.md 4: the BLE path held net.near_hold_s stops WiFi (NEAR); once it is gone, WiFi comes back after
+// net.away_grace_s, at once if a mood is waiting for its ack.
+static void handover(hb_core_t *c, uint32_t now_ms, hb_actions_t *out)
+{
+    if (ble_live(c) && hb_due(now_ms, c->phone_seen + HB_PHONE_SILENT_MS)) {
+        ble_in(c, c->ble, false, now_ms);  // a silent phone (Doze): as if it said its server link was down
+    }
+    if (ble_live(c)) {
+        if (!c->near_off && hb_due(now_ms, c->live_at + c->cfg.near_hold_s * 1000u)) {
+            link_in(c, HB_LI_STOP, now_ms, out);
+            c->near_off = true;
+        }
+    } else if (c->near_off && (hb_due(now_ms, c->wifi_due) || c->n_out)) {
+        c->near_off = false;
+        if (wifi_wanted(c)) {
+            link_in(c, HB_LI_START, now_ms, out);
+        }
     }
 }
 
@@ -179,7 +277,7 @@ static void link_in(hb_core_t *c, hb_link_in_t in, uint32_t now_ms, hb_actions_t
 // path (none: the router retries). An empty battery accepts nothing new.
 static void on_show(hb_core_t *c, const hb_ev_t *ev, uint32_t now_ms, hb_actions_t *out)
 {
-    if (ev->k <= HB_MOOD_NONE || ev->k > HB_MOOD_ANNOY) {
+    if (ev->k <= HB_MOOD_NONE || ev->k >= HB_MOODS) {
         return;
     }
     if (!seen(c, ev->id)) {
@@ -188,7 +286,7 @@ static void on_show(hb_core_t *c, const hb_ev_t *ev, uint32_t now_ms, hb_actions
         }
         remember(c, ev->id);
         activity(c, now_ms);
-        hb_fx_start(&c->fx, k_mood_fx[ev->k], 0, now_ms);
+        play(c, ev->k, ev->rgb, ev->pat, ev->at, now_ms);
     }
     if (c->path != HB_PATH_NONE) {
         send_up(out, HB_MOOD_NONE, c->path, ev->id);
@@ -211,11 +309,24 @@ static void on_gesture(hb_core_t *c, hb_btn_ev_t g, uint32_t now_ms)
         hb_fx_start(&c->fx, k_mood_fx[k], 0, now_ms);  // the presser's own beacon plays it too
         break;
     }
+    case HB_BTN_CUSTOM:  // tap then hold: our own colour and pattern from the config
+        queue_mood(c, HB_MOOD_CUSTOM);
+        hb_fx_start(&c->fx, HB_FX_CUSTOM, c->cfg.mood_pat, now_ms);
+        memcpy(c->fx.rgb, c->cfg.mood_rgb, 3);
+        break;
+    case HB_BTN_TOGETHER:  // a 2-5 s hold: an invitation to breathe together
+        queue_mood(c, HB_MOOD_TOGETHER);
+        hb_fx_start(&c->fx, HB_FX_BREATH, 3, now_ms);
+        break;
     case HB_BTN_HOLD:
         battery_bar(c, now_ms);
         break;
     case HB_BTN_PAIR:
         c->pair_until = now_ms + HB_PAIR_WINDOW_MS;  // the blue pulse starts once the bar has finished
+        break;
+    case HB_BTN_RESET:  // review R8: recovery without USB
+        hb_fx_start(&c->fx, HB_FX_RESET, 0, now_ms);
+        c->reset_pending = true;
         break;
     default:
         break;
@@ -229,8 +340,28 @@ static uint32_t sooner(uint32_t cur, uint32_t now_ms, uint32_t t)
 }
 
 // Common tail of boot and step: state, frame, and when to come back.
+// now_ms wraps every 49.7 days and hb_due compares within +-24.86 days: a deadline left in the past would
+// wrap back into the future (PAIRING reopening, schedule sleep blocked). Past deadlines are kept at now, and the
+// wall clock is rebased daily so epoch0 + (now - ms0) never wraps either.
+static void keep_time(hb_core_t *c, uint32_t now_ms)
+{
+    uint32_t *past[] = {&c->pair_until, &c->grace_until, &c->nap_due, &c->batt_due, &c->tele_due, &c->wifi_due};
+    for (size_t i = 0; i < sizeof past / sizeof past[0]; i++) {
+        if (hb_due(now_ms, *past[i])) {
+            *past[i] = now_ms;
+        }
+    }
+    if (c->epoch0 && now_ms - c->ms0 >= 86400000u) {
+        uint32_t s = (now_ms - c->ms0) / 1000;
+        c->epoch0 += s;
+        c->ms0 += s * 1000;
+    }
+}
+
 static void finish(hb_core_t *c, hb_state_t before, uint32_t now_ms, hb_actions_t *out)
 {
+    keep_time(c, now_ms);
+    handover(c, now_ms, out);
     if (out->link == HB_LINK_NONE) {
         link_in(c, HB_LI_POLL, now_ms, out);
     }
@@ -244,18 +375,25 @@ static void finish(hb_core_t *c, hb_state_t before, uint32_t now_ms, hb_actions_
 
     uint8_t frame[HB_PIXELS][3];
     bool busy = hb_fx_frame(&c->fx, now_ms, c->cfg.bright, frame);
+    if (!busy && !c->sleep_pending) {  // never left lit into a deep sleep: the pixels latch their last colour
+        hb_fx_idle(c->streak > 0, c->partner_near && c->cfg.presence, c->cfg.bright, frame);
+    }
     if (memcmp(frame, c->led, sizeof frame) != 0) {
         memcpy(c->led, frame, sizeof frame);
         memcpy(out->led, frame, sizeof frame);
         out->led_dirty = true;
     }
     busy = busy || hb_btn_busy(&c->btn);
-    bool up = c->link.st == HB_LS_UP;
-    if (up && hb_due(now_ms, c->tele_due)) {
+    bool live = c->path != HB_PATH_NONE;  // `tele` goes out on whichever path is live
+    if (live && hb_due(now_ms, c->tele_due)) {
         out->tele = true;
         c->tele_due = now_ms + c->cfg.tele_min * 60000u;
     }
 
+    if (c->reset_pending && !busy) {
+        out->factory_reset = true;  // the port erases and restarts; nothing after this matters
+        c->reset_pending = false;
+    }
     if (c->sleep_pending && !busy) {
         out->sleep = true;
         out->sleep_s = c->sleep_s;
@@ -277,8 +415,16 @@ static void finish(hb_core_t *c, hb_state_t before, uint32_t now_ms, hb_actions_
         for (uint8_t i = 0; i < c->n_out; i++) {
             next = sooner(next, now_ms, c->out[i].due);  // past deadlines (parked) are ignored
         }
-        if (c->link.st != HB_LS_OFF) {
-            next = sooner(next, now_ms, up ? c->tele_due : c->link.due);
+        if (c->link.st != HB_LS_OFF && c->link.st != HB_LS_UP) {
+            next = sooner(next, now_ms, c->link.due);
+        }
+        if (live) {
+            next = sooner(next, now_ms, c->tele_due);
+        }
+        if (ble_live(c) && !c->near_off) {
+            next = sooner(next, now_ms, c->live_at + c->cfg.near_hold_s * 1000u);
+        } else if (!ble_live(c) && c->near_off) {
+            next = sooner(next, now_ms, c->wifi_due);
         }
     }
     out->next_ms = next;
@@ -305,6 +451,7 @@ void hb_core_boot(hb_core_t *c, const hb_cfg_t *cfg, const hb_boot_t *boot, uint
     c->path = HB_PATH_NONE;
     c->claimed = boot->claimed;
     c->wifi_known = boot->wifi;
+    c->ble = c->phone = c->near_off = c->checkin = false;  // the BLE stack starts fresh on every boot
     c->link = (hb_link_t){.cached = boot->ap_cached};
     c->report = false;
     c->sleep_pending = false;
@@ -329,14 +476,23 @@ void hb_core_boot(hb_core_t *c, const hb_cfg_t *cfg, const hb_boot_t *boot, uint
         break;
     case HB_WAKE_TIMER:
         if (slept == HB_ST_NAP) {
-            c->nap_due = now_ms + HB_NAP_CHECKIN_MS;
+            c->nap_due = now_ms + HB_NAP_LINK_MS;  // the 10 s count starts when the link is up (link_in)
+            c->checkin = true;
         }
+        if (slept == HB_ST_SLEEP && c->morning.kind != HB_FX_NONE) {  // good morning: last evening's mood, softly
+            c->fx = c->morning;
+            c->fx.t0 = now_ms;
+            c->fx.level = HB_GOOD_MORNING_LEVEL;
+            c->morning.kind = HB_FX_NONE;
+        }
+        break;
+    case HB_WAKE_RESET:
         break;
     }
     if (wifi_wanted(c)) {
         link_in(c, HB_LI_START, now_ms, out);
     }
-    if (boot->wake != HB_WAKE_TIMER) {  // a timer wake is quiet
+    if (boot->wake != HB_WAKE_TIMER && boot->wake != HB_WAKE_RESET) {  // timer and reset wakes are quiet
         if (c->batt.low) {
             hb_fx_start(&c->fx, HB_FX_LOW, 0, now_ms);
         } else {
@@ -379,8 +535,27 @@ void hb_core_step(hb_core_t *c, const hb_ev_t *ev, uint32_t now_ms, hb_actions_t
             hb_policy_sleep(c, HB_ST_SLEEP, s);
         }
         break;
-    case HB_EV_PATH:
-        set_path(c, ev->path, now_ms);
+    case HB_EV_BLE:
+        ble_in(c, ev->up, c->phone, now_ms);
+        break;
+    case HB_EV_PHONE:
+        c->phone_seen = now_ms;
+        ble_in(c, c->ble, ev->up, now_ms);
+        if (ble_live(c)) {  // the phone says hello on every (re)connect: it may be a new app session
+            c->report = true;
+            c->tele_due = now_ms;
+        }
+        break;
+    case HB_EV_PROV:
+        c->wifi_known = ev->up;
+        if (ev->up && ble_live(c)) {  // a WiFi change is tried now; NEAR stops WiFi again after the hold
+            c->near_off = false;
+            c->live_at = now_ms;
+        }
+        link_in(c, HB_LI_STOP, now_ms, out);  // a fresh round on the new networks
+        if (wifi_wanted(c)) {
+            link_in(c, HB_LI_START, now_ms, out);
+        }
         break;
     case HB_EV_CLAIMED:
         c->claimed = true;
@@ -394,6 +569,15 @@ void hb_core_step(hb_core_t *c, const hb_ev_t *ev, uint32_t now_ms, hb_actions_t
         break;
     case HB_EV_MQTT:
         link_in(c, ev->up ? HB_LI_MQTT_UP : HB_LI_MQTT_DOWN, now_ms, out);
+        break;
+    case HB_EV_HELLO:
+        c->phone_seen = now_ms;
+        break;
+    case HB_EV_STREAK:
+        c->streak = (uint16_t)(ev->mv > 9999 ? 9999 : ev->mv);
+        break;
+    case HB_EV_PRESENCE:
+        c->partner_near = ev->up;
         break;
     case HB_EV_CFG:
         c->cfg = *ev->cfg;

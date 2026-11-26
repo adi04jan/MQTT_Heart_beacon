@@ -1,4 +1,6 @@
 // :app - Compose UI, the connectedDevice link service, CDM, BLE GATT client, MQTT client. Manual DI (App.kt).
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -15,8 +17,11 @@ android {
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = 1
         versionName = "0.1.0"
-        // Default server; editable on the login screen. TEST-NET placeholder until M2 picks the real one.
-        buildConfigField("String", "DEFAULT_HOST", "\"203.0.113.10\"")
+        // Default server; editable on the login screen. The real address comes from `hb.host` in the
+        // gitignored local.properties so it stays out of the repo; TEST-NET placeholder otherwise.
+        val host = Properties().apply { rootProject.file("local.properties").takeIf { it.exists() }?.reader()?.use { load(it) } }
+            .getProperty("hb.host", "203.0.113.10")
+        buildConfigField("String", "DEFAULT_HOST", "\"$host\"")
     }
 
     buildTypes {

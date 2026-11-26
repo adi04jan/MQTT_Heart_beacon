@@ -29,12 +29,17 @@ from typing import Callable
 from . import models
 
 log = logging.getLogger("hb.router")
-KINDS = frozenset({"heart", "sorry", "annoy"})
+KINDS = frozenset({"heart", "sorry", "annoy", "custom", "together"})
+TOGETHER_S = 10  # two members' `together` this close: both circles' beacons breathe in step
+LOW_PCT, LOW_RESET_PCT = 15, 30  # battery nudge to the other members once at <= 15 %, again after > 30 %
+DAY_TZ_MIN = 330  # ponytail: streak and anniversary days run in IST; a per-circle zone if circles span zones
+STREAK_DAYS = 400  # history kept for the streak
 # What a beacon may put in `tele` (anything else, or out of range, is dropped before it is stored or shown).
 TELE_INTS = {"mv": (0, 10_000), "pct": (0, 100), "rssi": (-150, 0), "cfg": (0, 2**31 - 1),
              "up_s": (0, 2**32 - 1), "heap": (0, 2**32 - 1), "rst": (0, 2**32 - 1)}
 TELE_STRS = frozenset({"fw", "hw", "rst"})  # <= 32 characters
 RETRY_S = 10
+PING_S = 120  # an up beacon that answered neither path is asked `get info` this often while hearts wait
 EXPIRE_S = 24 * 3600
 BURST_S = 3
 UP_STATES = frozenset({"near", "away"})
@@ -60,6 +65,8 @@ class Beacon:
     wake: int = 0
     last_seen: int = 0
     tele: dict = field(default_factory=dict)
+    ping_at: int = 0  # last `get info` sent while it was unreachable with hearts waiting (not persisted)
+    low_told: bool = False  # the other members were told its battery is low (not persisted: may repeat once)
     dirty: bool = False
 
     def live(self) -> str | None:
@@ -101,6 +108,12 @@ class State:
     deliveries: list[Delivery] = field(default_factory=list)
     events: dict[tuple[str, str], Event] = field(default_factory=dict)
     new_events: list[Event] = field(default_factory=list)
+    together: dict[str, int] = field(default_factory=dict)  # uid -> when they last sent `together`
+    days: dict[str, set[int]] = field(default_factory=dict)  # uid -> local day numbers they sent a mood on
+    streak: dict[str, int] = field(default_factory=dict)  # circle -> days in a row everyone sent one
+    day: int = 0  # the local day the streaks were last computed for
+    anniv: dict[str, str] = field(default_factory=dict)  # circle -> "MM-DD HH:MM" (setting table)
+    fired: dict[str, int] = field(default_factory=dict)  # circle -> year its anniversary last played
     new_id: Callable[[], str] = lambda: secrets.token_hex(8)
 
 
@@ -184,13 +197,22 @@ def _from_beacon(st, did, env, path, now, out):
         return
     _links(st, b, now, out, **{path: True}, path=path)  # hearing from it proves the path
     if env.t == "mood":
-        if _str(env.body, "k") in KINDS:
-            _new_event(st, did, b.owner, env.id, env.body["k"], now, out)
+        k = _kind(env.body)
+        if k:
+            _new_event(st, did, b.owner, env.id, k, now, out)
     elif env.t == "shown":
         _shown(st, did, env.id, now, out)
     elif env.t == "tele":
         b.tele = _tele(env.body)
         _status(st, b, env, b.tele, now, out)
+        pct, owner = b.tele.get("pct"), st.users.get(b.owner)
+        if isinstance(pct, int) and owner:  # I10: tell the others once when it runs low
+            if pct <= LOW_PCT and not b.low_told:
+                b.low_told = True
+                _circle_down(st, owner.circle, "batt", {"did": b.did, "name": owner.name, "pct": pct}, now, out,
+                             beacons=False, skip_uid=owner.uid)
+            elif pct > LOW_RESET_PCT:
+                b.low_told = False
     elif env.t not in models.TYPES:
         _send(st, b, path, models.unknown_t_response(env, st.new_id(), now), now, out)
 
@@ -201,6 +223,7 @@ def _beacon_state(st, b, env, path, now, out):
     if s not in models.STATES and s != models.LWT_STATE:  # exact lowercase names only (PROTOCOL.md 3)
         return
     p = _str(body, "path") if _str(body, "path") in ("wifi", "ble") else path
+    was_near = b.st == "near"
     b.st = s
     wake = body.get("wake")
     b.wake = wake if models._is_int(wake) and 0 <= wake <= 0xFFFFFFFF else 0  # epoch s, same range as `ts`
@@ -208,10 +231,17 @@ def _beacon_state(st, b, env, path, now, out):
         _links(st, b, now, out, wifi=False)
     elif s in UP_STATES:
         _links(st, b, now, out, wifi=p == "wifi", ble=p == "ble", path=p)
+        owner = st.users.get(b.owner)
+        if owner and st.streak.get(owner.circle):  # its ember, on every connect
+            _send(st, b, p, models.encode("streak", st.new_id(), now, {"n": st.streak[owner.circle]}), now, out)
         if p == "wifi":  # MQTT (re)connect: give it the time
             out.append(Pub(f"hb/v1/d/{b.did}/down", models.encode("time", st.new_id(), now, {"tz": b.tz})))
     else:  # going to deep sleep, offline or pairing
         _links(st, b, now, out, wifi=False, ble=False)
+    owner = st.users.get(b.owner)
+    if owner and was_near != (s == "near"):  # I7: the others' beacons and phones
+        _circle_down(st, owner.circle, "presence", {"uid": owner.uid, "near": s == "near"}, now, out,
+                     skip_uid=owner.uid)
     fwd = {"st": s}
     if _str(body, "path") in ("wifi", "ble"):
         fwd["path"] = body["path"]
@@ -232,8 +262,9 @@ def _from_phone(st, uid, env, now, out):
         return
     body = env.body
     if env.t == "mood":
-        if _str(body, "k") in KINDS:
-            _new_event(st, uid, uid, env.id, body["k"], now, out)
+        k = _kind(body)
+        if k:
+            _new_event(st, uid, uid, env.id, k, now, out)
         return
     if env.t in ("relay", "link"):
         b = st.beacons.get(_str(body, "did") or "")
@@ -281,6 +312,63 @@ def _links(st, b, now, out, wifi=None, ble=None, path=None):
 
 # ---- delivery ---------------------------------------------------------------------------
 
+def _kind(body) -> str | None:
+    """A mood's `k` as the router keeps it: a custom one carries its colour and pattern (PROTOCOL.md 3)."""
+    k = _str(body, "k")
+    if k == "custom":
+        rgb, pat = body.get("rgb"), body.get("pat")
+        ok = isinstance(rgb, str) and models._RGB.fullmatch(rgb) and type(pat) is int and pat in (0, 1)
+        return f"custom:{rgb}:{pat}" if ok else "custom:#ff4fa3:0"
+    return k if k in KINDS else None
+
+
+def _kbody(k: str) -> dict:
+    if k.startswith("custom:"):
+        _, rgb, pat = k.split(":")
+        return {"k": "custom", "rgb": rgb, "pat": int(pat)}
+    return {"k": k}
+
+
+def _day(now: int) -> int:
+    return (now + DAY_TZ_MIN * 60) // 86400
+
+
+def _circle_down(st, circle, t, body, now, out, beacons=True, phones=True, skip_uid=None):
+    """One message to every member's phone and live beacon in `circle` (fresh ids), but `skip_uid`'s."""
+    members = {u.uid for u in st.users.values() if u.circle == circle and u.uid != skip_uid}
+    if phones:
+        for uid in sorted(members):
+            out.append(Pub(f"hb/v1/u/{uid}/down", models.encode(t, st.new_id(), now, body)))
+    if beacons:
+        for b in sorted(st.beacons.values(), key=lambda b: b.did):
+            if b.owner in members and b.live():
+                _send(st, b, b.live(), models.encode(t, st.new_id(), now, body), now, out)
+
+
+def _streak(st, circle, today) -> int:
+    members = [u.uid for u in st.users.values() if u.circle == circle]
+    if len(members) < 2:
+        return 0
+
+    def full(d):
+        return all(d in st.days.get(m, ()) for m in members)
+
+    d, n = (today if full(today) else today - 1), 0
+    while full(d):
+        n, d = n + 1, d - 1
+    return n
+
+
+def _streaks(st, now, out, circles=None):
+    """Recompute the circles' streaks; tell everyone in a circle whose streak changed (I5)."""
+    st.day = _day(now)
+    for c in circles or {u.circle for u in st.users.values()}:
+        n = _streak(st, c, st.day)
+        if n != st.streak.get(c, 0):
+            st.streak[c] = n
+            _circle_down(st, c, "streak", {"n": n}, now, out)
+
+
 def _new_event(st, src, uid, eid, k, now, out):
     sender = st.users.get(uid)
     if sender is None or (src, eid) in st.events:
@@ -290,13 +378,26 @@ def _new_event(st, src, uid, eid, k, now, out):
     st.new_events.append(e)
     others = {u.uid for u in st.users.values() if u.circle == sender.circle and u.uid != uid}
     for o in sorted(others):
-        out.append(Pub(f"hb/v1/u/{o}/down", models.encode("mood", eid, now, {"k": k, "from": sender.name})))
+        out.append(Pub(f"hb/v1/u/{o}/down", models.encode("mood", eid, now, {**_kbody(k), "from": sender.name})))
     for b in sorted(st.beacons.values(), key=lambda b: b.did):
         if b.owner in others:
             d = Delivery(src, eid, b.did, k, now, owner=b.owner)
             st.deliveries.append(d)
             _rcpt(st, d, "queued", now, out)
             _deliver(st, b, d, now, out)
+    if k == "together":  # I3: a second member within 10 s: every beacon of both breathes in step
+        other = next((u for u, t in st.together.items() if u != uid and now - t <= TOGETHER_S
+                      and st.users.get(u) and st.users[u].circle == sender.circle), None)
+        if other:
+            st.together.pop(other, None)
+            for b in sorted(st.beacons.values(), key=lambda b: b.did):
+                if b.owner in (uid, other) and b.live():
+                    _send(st, b, b.live(), models.encode("show", st.new_id(), now, {"k": "together", "at": now + 2}),
+                          now, out)
+        else:
+            st.together[uid] = now
+    st.days.setdefault(uid, set()).add(_day(now))
+    _streaks(st, now, out, {sender.circle})
 
 
 def _deliver(st, b, d, now, out):
@@ -320,7 +421,7 @@ def _show(st, b, group, path, now, out):
         d.show_id, d.status, d.path = sid, "sent", path
         d.sent_at = d.tried_at = now
         d.tries, d.dirty = 1, True
-    _send(st, b, path, models.encode("show", sid, now, {"k": group[0].k}), now, out)
+    _send(st, b, path, models.encode("show", sid, now, _kbody(group[0].k)), now, out)
 
 
 def _flush(st, b, now, out):
@@ -337,6 +438,11 @@ def _shown(st, did, sid, now, out):
         if d.did == did and d.show_id == sid and d.status in ("sent", "pending"):
             d.status, d.dirty = "shown", True
             _rcpt(st, d, "shown", now, out)
+            ev = st.events.get((d.src, d.eid))
+            if ev and ev.k != "together":  # I2: the sender's own cage gives one soft pulse
+                for ob in sorted(st.beacons.values(), key=lambda b: b.did):
+                    if ob.owner == ev.uid and ob.live():
+                        _send(st, ob, ob.live(), models.encode("show", st.new_id(), now, {"k": "echo"}), now, out)
 
 
 def _send(st, b, path, raw, now, out):
@@ -349,6 +455,14 @@ def _send(st, b, path, raw, now, out):
         out.append(Pub(f"hb/v1/u/{b.owner}/down", models.encode("relay", st.new_id(), now, {"did": b.did, "m": m})))
 
 
+def _ping(st, b, now, out):
+    """`get info` on both paths: the beacon's `resp` comes back on whichever works (PROTOCOL.md 3)."""
+    b.ping_at = now
+    raw = models.encode("get", st.new_id(), now, {"what": "info"})
+    _send(st, b, "wifi", raw, now, out)
+    _send(st, b, "ble", raw, now, out)
+
+
 def _rcpt(st, d, status, now, out):
     sender = st.events.get((d.src, d.eid))
     if sender:
@@ -356,6 +470,15 @@ def _rcpt(st, d, status, now, out):
 
 
 def _tick(st, now, out):
+    if st.users and _day(now) != st.day:  # a new day can break a streak
+        _streaks(st, now, out)
+    if st.anniv:  # I9: once a year, on the minute
+        t = time.gmtime(now + DAY_TZ_MIN * 60)
+        stamp = f"{t.tm_mon:02d}-{t.tm_mday:02d} {t.tm_hour:02d}:{t.tm_min:02d}"
+        for c, when in st.anniv.items():
+            if when == stamp and st.fired.get(c) != t.tm_year:
+                st.fired[c] = t.tm_year
+                _circle_down(st, c, "show", {"k": "celebrate"}, now, out, phones=False)
     for d in st.deliveries:
         if d.status in ("pending", "sent") and now - d.created >= EXPIRE_S:
             d.status, d.dirty = "expired", True
@@ -375,11 +498,18 @@ def _tick(st, now, out):
                 x.status, x.dirty = "pending", True
             b.wifi = b.ble = False
             b.dirty = True
+            _ping(st, b, now, out)
             continue
         other = "ble" if d.path == "wifi" else "wifi"
         for x in group:
             x.path, x.tried_at, x.tries, x.dirty = other, now, x.tries + 1, True
         _send(st, b, other, models.encode("show", d.show_id, now, {"k": d.k}), now, out)
+    # An up beacon that went quiet with hearts waiting: ask it again every PING_S instead of waiting for its next
+    # `tele` (up to net.tele_min). Any answer is an uplink, and _links flushes the queue (review S1).
+    for b in st.beacons.values():
+        if (b.live() is None and b.st in UP_STATES and now - b.ping_at >= PING_S
+                and any(d.did == b.did and d.status == "pending" for d in st.deliveries)):
+            _ping(st, b, now, out)
     # ponytail: linear scans every second; fine for a handful of beacons, index by did if that grows
     st.deliveries = [d for d in st.deliveries
                      if d.dirty or d.status in ("pending", "sent") or now - d.created < EXPIRE_S]
@@ -423,6 +553,11 @@ def _still_valid(st, d) -> bool:
 _STATUS = ("wifi", "ble", "path", "st", "wake", "last_seen", "tele")
 
 
+def load_anniv(db) -> dict[str, str]:
+    """circle -> "MM-DD HH:MM" from the setting table (admin page)."""
+    return {r["key"][len("anniv:"):]: r["value"] for r in db.q("SELECT key, value FROM setting WHERE key LIKE 'anniv:%'")}
+
+
 def load_state(db, now: int) -> State:
     st = State()
     for r in db.q("SELECT * FROM event WHERE ts > ?", (now - EXPIRE_S,)):
@@ -431,6 +566,10 @@ def load_state(db, now: int) -> State:
         st.deliveries.append(Delivery(r["src"], r["eid"], r["did"], r["k"], r["created"], r["status"], r["path"],
                                       r["sent_at"], r["tried_at"], r["tries"], r["show_id"], r["owner"], False))
     _directory(st, *load_directory(db), now, [])  # receipts for anything stale are lost across a restart
+    for r in db.q("SELECT uid, ts FROM event WHERE ts > ?", (now - STREAK_DAYS * 86400,)):
+        st.days.setdefault(r["uid"], set()).add(_day(r["ts"]))
+    st.anniv = load_anniv(db)
+    _streaks(st, now, [])
     for r in db.q("SELECT did, status FROM device WHERE claimed = 1"):
         b = st.beacons.get(r["did"])
         if b:
@@ -525,3 +664,4 @@ class Glue:
         snapshot from a concurrent refresh could land after a newer one."""
         with self.lock:
             self.handle(Directory(*self.loader(self.db), int(self.clock())))
+            self.state.anniv = load_anniv(self.db)  # the admin's anniversary dates (I9)

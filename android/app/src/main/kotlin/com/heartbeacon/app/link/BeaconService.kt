@@ -34,8 +34,13 @@ class BeaconService : LifecycleService() {
         startForeground(NOTE_ID, linkNote("Connected to your beacon"), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         registerReceiver(btState, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
         if (repo?.host(true) != true) {
-            Log.i(TAG, "no account or beacon yet; stopping")
-            stopSelf()
+            // No beacon (yet): still keep the process, so the partner's hearts arrive as notifications (review I1).
+            if (repo?.signedIn == true) {
+                getSystemService(NotificationManager::class.java).notify(NOTE_ID, linkNote("Listening for hearts"))
+            } else {
+                Log.i(TAG, "not signed in; stopping")
+                stopSelf()
+            }
         }
     }
 
@@ -76,11 +81,45 @@ class BeaconService : LifecycleService() {
         fun notifyMood(ctx: Context, id: String, from: String, mood: Mood) {
             if (ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
             val word = mood.name.lowercase().replaceFirstChar { it.uppercase() }
+            val title = when (mood) {
+                Mood.CUSTOM -> "$from sent their colour"
+                Mood.TOGETHER -> "$from wants to breathe together"
+                else -> "$from sent a${if (mood == Mood.ANNOY) "n" else ""} $word"
+            }
+            val note = id.hashCode()
             ctx.getSystemService(NotificationManager::class.java).notify(
-                id.hashCode(),
+                note,
                 Notification.Builder(ctx, CH_MOODS)
                     .setSmallIcon(R.drawable.ic_heart)
-                    .setContentTitle("$from sent a${if (mood == Mood.ANNOY) "n" else ""} $word")
+                    .setContentTitle(title)
+                    .setContentIntent(openApp(ctx))
+                    .setAutoCancel(true)
+                    // Review I8: answer without opening the app.
+                    .addAction(reply(ctx, note, if (mood == Mood.TOGETHER) Mood.TOGETHER else Mood.HEART))
+                    .addAction(reply(ctx, note, Mood.SORRY))
+                    .build(),
+            )
+        }
+
+        private fun reply(ctx: Context, note: Int, mood: Mood): Notification.Action {
+            val label = when (mood) { Mood.TOGETHER -> "Together"; Mood.SORRY -> "Sorry"; else -> "Heart" }
+            val pi = PendingIntent.getBroadcast(
+                ctx, note * 8 + mood.ordinal,
+                Intent(ctx, ReplyReceiver::class.java).putExtra(ReplyReceiver.MOOD, mood.wire).putExtra(ReplyReceiver.NOTE, note),
+                PendingIntent.FLAG_IMMUTABLE,
+            )
+            return Notification.Action.Builder(null, label, pi).build()
+        }
+
+        /** "Aditya's heart is running low (12 %)": another member's beacon (`batt`, review I10). */
+        fun notifyBatt(ctx: Context, name: String, pct: Int) {
+            if (ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+            ctx.getSystemService(NotificationManager::class.java).notify(
+                "batt:$name".hashCode(),
+                Notification.Builder(ctx, CH_MOODS)
+                    .setSmallIcon(R.drawable.ic_heart)
+                    .setContentTitle("$name's heart is running low ($pct %)")
+                    .setContentText("A charge keeps your hearts reaching it.")
                     .setContentIntent(openApp(ctx))
                     .setAutoCancel(true)
                     .build(),

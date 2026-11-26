@@ -183,16 +183,29 @@ cd android && ./gradlew test --no-daemon                     # JDK 21; JAVA_HOME
 IDF environment: `. C:\esp\esp-idf\export.ps1` (PowerShell), `export.bat` (cmd), `. /c/esp/esp-idf/export.sh`
 (Git Bash). On this PC set `$env:IDF_PYTHON_ENV_PATH = "C:\Users\Adity\.espressif\python_env\idf5.3_py3.11_env"`
 first (PATH has Python 3.12, the IDF env is 3.11). Build: `idf.py -C fw build` (size gate prints `size gate: N of
-1237319 bytes`; M3 image is ~954 KB, so M4's NimBLE must be trimmed to fit). The host test build compiles IDF's
-mbedTLS sources for config-signature checks (found automatically, or `-DHB_MBEDTLS_DIR`).
+1900000 bytes`; the M4 image with NimBLE is ~1.16 MB). Flash: `idf.py -C fw -p COM6 flash` (bootloader + table +
+app) or `app-flash`. The host test build compiles IDF's mbedTLS sources for config-signature checks (found
+automatically, or `-DHB_MBEDTLS_DIR`).
+
+- v1 is retired on v2 units: own partition table (`fw/partitions.csv`, two 1.9 MB OTA slots, no SPIFFS), so a v1 unit
+  moves to v2 by one USB flash, not by v1 OTA. COM6's v1 flash backup: `%USERPROFILE%\hb-fw-backup\` (it holds v1
+  WiFi credentials; keep it private).
+- Bench console on COM6 (115200, DTR/RTS low): `prov`, `prov <key> <value>` (did user pass host ssid0 psk0),
+  `prov erase`, `reboot`. It polls stdin through the default console VFS on purpose: the usb_serial_jtag *driver*
+  storms its TX-empty interrupt when no host reads the logs (watchdog hang, 2026-11-26). Don't reinstall it.
+- BLE is the product way in: the app's Add flow does `wifi.set` (tried before it is stored), then `claim`, then the
+  signed `cfg`. New bonds only inside the pairing window (2 min after an unclaimed boot, or a 5 s button hold).
+- The router sends a mood to every *other* circle member, so your own hearts stay "Queued" until another member's
+  device exists. Bench delivery to COM6 by sending as the other user (scratch script, credentials from
+  `%USERPROFILE%\hb-pki-backup`; API login returns the stored MQTT password, it does not rotate it).
 
 - `hb_sim` (`fw/test/host/build/sim/hb_sim --port 7000 --did HB-000001`): the beacon's `hb_core` behind a line
   TCP protocol (`fw/sim/README.md`); `fw/sim/bridge.py` connects it to a broker. Use it instead of hardware for
   end-to-end runs; never write a separate beacon model.
 - Server end to end without the home server: `wsl -d Ubuntu-20.04 -e bash deploy/e2e-local.sh` (WSL has apt
   Mosquitto 1.6.9, the same as the target; prints `SMOKE PASS`). Deploy steps: `deploy/RUNBOOK.md`.
-- `fw/main/certs/` and `android/app/src/main/assets/hb_ca.pem` hold **test** CA/keys until deploy; replace them
-  with the deployed `ca.crt` / `cfg-sign.pub` (the CA private key stays off the server).
+- `fw/main/certs/` and `android/app/src/main/assets/hb_ca.pem` hold the **deployed** CA cert and config public key
+  (public, no server IP inside). The test pair for host tests and `hb_sim` lives in `fw/test/certs/`.
 
 ## Broker and server
 

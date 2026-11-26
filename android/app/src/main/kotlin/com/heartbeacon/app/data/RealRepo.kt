@@ -53,20 +53,12 @@ class RealRepo(
     @Volatile private var mac: String? = null
     @Volatile private var hosted = false // BeaconService is up and wants the GATT open
     @Volatile private var near = false
+    /** The last presence the beacon or the router reported: what the card falls back to when this phone leaves. */
+    @Volatile private var reported: Presence = Presence.Offline
     private var raw: JsonObject? = null // last GET settings, for keys the screens do not model
     private var fw = ""
     private var fwTarget: String? = null
     private var wifi = emptyList<String>()
-
-    init {
-        // ponytail: two DataStore reads + a Keystore decrypt on the main thread at startup, so a signed-in
-        // user never sees the login screen flash and BeaconService (boot, presence) finds the beacon at once.
-        // Move behind a splash state if it ever shows up in traces.
-        val (a, s) = runBlocking { creds.load() to store.flow.first() }
-        mac = s.beaconMac
-        did = s.did
-        a?.let(::start)
-    }
 
     private fun apiFor(host: String): HttpApi =
         api?.takeIf { it.base == HttpApi.baseUrl(host) } ?: HttpApi(host, tls).also { api = it }
@@ -99,10 +91,19 @@ class RealRepo(
 
         override fun local(m: Msg) = onLocal(m)
 
+        override fun bondLost() = beacon.update { it?.copy(needsPair = true) }
+
         override fun near(near: Boolean) {
             if (near == this@RealRepo.near) return
             this@RealRepo.near = near
-            if (near) beacon.update { it?.copy(presence = Presence.Near, lastSeenEpochMs = System.currentTimeMillis()) }
+            // Leaving: the last reported state, unless that was "near" through this very phone, which is no longer
+            // true; then Offline ("last seen") until the beacon reports over its own WiFi.
+            if (near) scope.launch { readWifi() } // the beacon's stored networks (they live only on the beacon)
+            val p = if (near) Presence.Near else reported.takeIf { it != Presence.Near } ?: Presence.Offline
+            beacon.update { b ->
+                b?.copy(presence = p, lastSeenEpochMs = if (near) System.currentTimeMillis() else b.lastSeenEpochMs,
+                    needsPair = b.needsPair && !near)
+            }
         }
     }
 
@@ -114,7 +115,7 @@ class RealRepo(
             "mood" -> {
                 val mood = moodOf(str("k")) ?: return
                 val from = str("from") ?: "Someone"
-                val e = Event(m.id, mood, from, if (m.ts > 0) m.ts * 1000 else now, null)
+                val e = Event(m.id, mood, from, if (m.ts > 0) m.ts * 1000 else now, null, str("rgb"))
                 events.update { list -> if (list.any { it.id == e.id }) list else (listOf(e) + list).take(MAX_EVENTS) }
                 scope.launch { notifyMood(m.id, from, mood) }
             }
@@ -131,7 +132,20 @@ class RealRepo(
             }
             "state" -> {
                 val p = Presence.of(str("st") ?: return, (body["wake"] as? JsonPrimitive)?.longOrNull ?: 0) ?: return
+                reported = p
                 beacon.update { it?.copy(presence = if (near) Presence.Near else p, lastSeenEpochMs = now) }
+            }
+            "streak" -> {
+                val n = (body["n"] as? JsonPrimitive)?.intOrNull ?: return
+                beacon.update { it?.copy(streak = n) }
+            }
+            "presence" -> {
+                val near = (body["near"] as? JsonPrimitive)?.booleanOrNull ?: return
+                beacon.update { it?.copy(partnerNear = near) }
+            }
+            "batt" -> {
+                val pct = (body["pct"] as? JsonPrimitive)?.intOrNull ?: return
+                BeaconService.notifyBatt(ctx, str("name") ?: "Someone", pct)
             }
             "tele" -> {
                 (body["fw"] as? JsonPrimitive)?.contentOrNull?.let { v -> fw = v; settings.update { it?.copy(fw = v) } }
@@ -164,7 +178,7 @@ class RealRepo(
             }
             beacon.value = dev?.let { d ->
                 fw = (d["tele"] as? JsonObject)?.get("fw")?.jsonPrimitive?.contentOrNull ?: fw
-                beaconOf(d).let { if (near) it.copy(presence = Presence.Near) else it }
+                beaconOf(d).also { reported = it.presence }.let { if (near) it.copy(presence = Presence.Near) else it }
             }
             val fetched = eventsOf(api.events(MAX_EVENTS), a.uid)
             events.update { live ->
@@ -221,7 +235,13 @@ class RealRepo(
     override fun send(mood: Mood) {
         val id = Ids.random()
         events.update { (listOf(Event(id, mood, null, System.currentTimeMillis(), Mark.QUEUED)) + it).take(MAX_EVENTS) }
-        link?.sendMood(mood.wire, id)
+        // A custom mood carries this beacon's colour and pattern (PROTOCOL.md 3), so it looks the same everywhere.
+        val s = settings.value
+        val extra = if (mood == Mood.CUSTOM) buildJsonObject {
+            put("rgb", s?.moodRgb ?: "#ff4fa3")
+            put("pat", s?.moodPat ?: 0)
+        } else JsonObject(emptyMap())
+        link?.sendMood(mood.wire, id, extra)
     }
 
     override suspend fun update(s: DeviceSettings): String? {
@@ -233,7 +253,7 @@ class RealRepo(
         // In the repo's scope, so leaving the screen never cuts a save in half.
         return scope.async {
             try {
-                val cfg = api.saveSettings(d, settingsBody(s, raw?.let(::napMinOf)))
+                val cfg = api.saveSettings(d, settingsBody(s, raw?.let(::napMinOf), old))
                 fwTarget = fwTargetOf(cfg) ?: fwTarget
                 link?.request("cfg", cfgBody(cfg)) // over BLE when near; the router's retained copy covers WiFi
                 null
@@ -274,6 +294,13 @@ class RealRepo(
         return (d["did"] as? JsonPrimitive)?.contentOrNull
     }
 
+    /** `wifi.list` over BLE: the networks the beacon keeps, for the settings list (PSKs never come back). */
+    private suspend fun readWifi() {
+        val d = link?.request("wifi.list", JsonObject(emptyMap()))?.body?.get("d") as? JsonObject ?: return
+        wifi = ssidsOf(d)
+        settings.update { it?.copy(wifi = wifi) }
+    }
+
     override suspend fun scanWifi(): List<WifiNet> =
         netsOf(link?.request("wifi.scan", JsonObject(emptyMap()), SCAN_MS)?.body?.get("d") as? JsonObject)
 
@@ -307,8 +334,10 @@ class RealRepo(
         val l = link ?: return NO_BEACON
         return try {
             val c = api.claim(did)
-            val ok = l.request("claim", c.beacon)
-            if (ok == null || (ok.body["ok"] as? JsonPrimitive)?.booleanOrNull != true) return NO_BEACON
+            val ok = l.request("claim", c.beacon) ?: return NO_BEACON
+            if ((ok.body["ok"] as? JsonPrimitive)?.booleanOrNull != true) {
+                return "Your beacon said no: ${(ok.body["err"] as? JsonPrimitive)?.contentOrNull ?: "no reason given"}."
+            }
             l.request("cfg", cfgBody(c.cfg))
             val cfg = api.saveSettings(did, buildJsonObject { put("name", name) })
             fwTarget = fwTargetOf(cfg)
@@ -350,10 +379,25 @@ class RealRepo(
         }
     }
 
+    /** Signed in: the service stays up for incoming hearts even with no beacon (review I1). */
+    val signedIn: Boolean get() = account != null
+
     /** For the debug switch to [FakeRepo]: drop the live link. */
     fun close() {
         link?.close()
         link = null
+    }
+
+    // Last in the class on purpose: a saved login starts the link here, which needs every field above
+    // (linkOut among them) already initialised. An earlier init crashed every signed-in launch.
+    init {
+        // ponytail: two DataStore reads + a Keystore decrypt on the main thread at startup, so a signed-in
+        // user never sees the login screen flash and BeaconService (boot, presence) finds the beacon at once.
+        // Move behind a splash state if it ever shows up in traces.
+        val (a, s) = runBlocking { creds.load() to store.flow.first() }
+        mac = s.beaconMac
+        did = s.did
+        a?.let(::start)
     }
 
     companion object {

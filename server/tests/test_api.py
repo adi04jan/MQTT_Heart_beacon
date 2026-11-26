@@ -49,6 +49,18 @@ def test_login_returns_mqtt_credentials_in_the_broker_file(e):
     assert e.c.post("/api/v1/login", json={"user": "alice", "pass": e.pw["alice"]}).status_code == 401
 
 
+def test_login_sweeps_expired_sessions_and_keeps_ten_per_user(e):
+    now = int(e.ctx.clock())
+    e.ctx.db.x("INSERT INTO session VALUES ('expired', 'bob', ?)", (now - api.SESSION_S - 1,))
+    for i in range(12):
+        e.ctx.db.x("INSERT INTO session VALUES (?, 'alice', ?)", (f"old{i}", now - 1000 + i))
+    assert e.c.post("/api/v1/login", json={"user": "alice", "pass": e.pw["alice"]}).status_code == 200
+    rows = e.ctx.db.q("SELECT token, uid FROM session")
+    assert not any(r["token"] == "expired" for r in rows)
+    assert sum(r["uid"] == "alice" for r in rows) == api.SESSIONS_PER_USER  # the new one and the 9 newest
+    assert not any(r["token"] in ("old0", "old1", "old2") for r in rows)
+
+
 def test_endpoints_need_a_token(e):
     assert e.c.get("/api/v1/me").status_code == 401
     assert e.c.get("/api/v1/me", headers={"Authorization": "Bearer forged"}).status_code == 401
@@ -230,7 +242,7 @@ def test_settings_user_keys_only_and_signed_publish(e):
     h = login(e, "alice")
     e.c.post("/api/v1/devices/claim", json={"did": A}, headers=h)
     s = e.c.get(f"/api/v1/devices/{A}/settings", headers=h).json()
-    assert s == {"n": 1, "name": "", "led": {"bright": 60},
+    assert s == {"n": 1, "name": "", "led": {"bright": 60, "presence": False}, "mood": {"rgb": "#ff4fa3", "pat": 0},
                  "sched": {"days": "1111110", "on": True, "start": "09:00", "stop": "19:00", "tz": 330},
                  "pwr": {"idle_nap_min": 0}, "net": {"use_wifi": True}}
     e.pubs.clear()

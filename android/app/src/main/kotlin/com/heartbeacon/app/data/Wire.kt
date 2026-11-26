@@ -74,6 +74,9 @@ fun settingsOf(s: JsonObject, fw: String, wifi: List<String>, fwTarget: String?)
         napWhenIdle = (napMinOf(s) ?: 0) > 0,
         fw = fw,
         fwAvailable = fwTarget?.takeIf { it.isNotEmpty() && it != fw },
+        moodRgb = s.obj("mood")?.str("rgb") ?: "#ff4fa3",
+        moodPat = (s.obj("mood")?.get("pat") as? JsonPrimitive)?.intOrNull ?: 0,
+        presence = (s.obj("led")?.get("presence") as? JsonPrimitive)?.booleanOrNull ?: false,
     )
 }
 
@@ -83,9 +86,21 @@ fun napMinOf(s: JsonObject): Int? = (s.obj("pwr")?.get("idle_nap_min") as? JsonP
  * The PUT body: every user key (PROTOCOL.md 7 "Who edits"), `sched.tz` left to the server. Nap on keeps
  * the beacon's current minutes, else the app's 90.
  */
-fun settingsBody(s: DeviceSettings, napMin: Int?): JsonObject = buildJsonObject {
+fun settingsBody(s: DeviceSettings, napMin: Int?, was: DeviceSettings? = null): JsonObject = buildJsonObject {
+    // The 2026-11-26 keys (led.presence, mood.*) go only when they changed: a server from before them refuses any
+    // key it does not know as admin-only, and would then refuse the whole save.
+    val newKeys = was == null || was.presence != s.presence || was.moodRgb != s.moodRgb || was.moodPat != s.moodPat
     put("name", s.name)
-    putJsonObject("led") { put("bright", s.bright) }
+    putJsonObject("led") {
+        put("bright", s.bright)
+        if (newKeys) put("presence", s.presence)
+    }
+    if (newKeys) {
+        putJsonObject("mood") {
+            put("rgb", s.moodRgb)
+            put("pat", s.moodPat)
+        }
+    }
     putJsonObject("sched") {
         put("on", s.schedOn)
         put("days", s.days)

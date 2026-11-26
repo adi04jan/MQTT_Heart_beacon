@@ -23,6 +23,9 @@
 @media (max-width: 52rem) { .lower { grid-template-columns: minmax(0, 1fr); } }
 {% endblock %}
 {% block main %}
+{% if cert_warn is not none %}<div class="notice bad" role="alert"><strong>TLS certificate</strong>The server's
+  certificate {{ "expired " ~ (-cert_warn) ~ " days ago" if cert_warn < 0 else "expires in " ~ cert_warn ~ " days" }}.
+  Every beacon and phone stops connecting then: issue a new leaf from the CA (deploy/RUNBOOK.md).</div>{% endif %}
 <h1>Beacons</h1>
 <p class="lede">{{ devices|length }} registered, {{ devices|selectattr("claimed")|list|length }} claimed. A beacon can be
   claimed only by the user it is assigned to.</p>
@@ -101,6 +104,18 @@
       <button class="btn quiet" type="submit">Add user</button>
     </form>
     <p class="hint" style="margin-top: 0.5rem">The password is generated (20 characters) and shown once.</p>
+  </section>
+  <section>
+    <h2>Anniversaries</h2>
+    {% for c in circles %}
+    <form method="post" action="/anniv" class="row">
+      <input type="hidden" name="circle" value="{{ c }}">
+      <label class="field"><span>{{ c }}: every beacon celebrates at (MM-DD HH:MM, IST)</span>
+        <input type="text" name="when" placeholder="02-14 09:00" value="{{ anniv.get(c, '') }}"
+               pattern="(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01]) ([01][0-9]|2[0-3]):[0-5][0-9]"></label>
+      <button class="btn quiet" type="submit">Save</button>
+    </form>
+    {% endfor %}
   </section>
 </div>
 {% endblock %}

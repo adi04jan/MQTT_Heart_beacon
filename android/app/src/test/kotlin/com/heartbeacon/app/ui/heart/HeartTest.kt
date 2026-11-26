@@ -40,6 +40,16 @@ class CageTest {
         assertEquals(0f, max[0] + min[0], 1e-3f) // left-right symmetric
     }
 
+    @Test fun ledRingIsMirrorSymmetric() {
+        assertEquals(0f, Cage.leds[0], 0f)
+        for (i in 1..4) {
+            val j = 9 - i
+            assertEquals("led $i x", -Cage.leds[3 * i], Cage.leds[3 * j], 1e-6f)
+            assertEquals("led $i y", Cage.leds[3 * i + 1], Cage.leds[3 * j + 1], 1e-6f)
+            assertEquals("led $i turn", -CageRenderer.LED_TURN[i], CageRenderer.LED_TURN[j], 1e-6f)
+        }
+    }
+
     @Test fun ledsAndCoreAreInsideTheCage() {
         fun inside(x: Float, y: Float, z: Float) = Cage.toImplicit(x, y, z).let { Cage.shape(it[0], it[1], it[2]) < 0 }
         for (i in 0 until 9) assertTrue("led $i", inside(Cage.leds[3 * i], Cage.leds[3 * i + 1], Cage.leds[3 * i + 2]))
@@ -75,6 +85,21 @@ class TwinTest {
         assertEquals(Fx.Kind.SORRY, t.playing!!.kind)
         t.woke(9000) // a later wake with nothing held plays nothing new
         assertEquals(5000L, t.playing!!.startMs)
+    }
+
+    @Test fun customPlaysTheSendersColourAndIdleShowsEmberAndPresence() {
+        val t = Twin()
+        t.mood(Mood.CUSTOM, awake = true, now = 0, rgb = "#0a14c8")
+        assertTrue(t.frame(520, 100, out))
+        assertEquals(listOf(10, 20, 200), listOf(out[0], out[1], out[2])) // peak of the first pulse, its colour
+        t.echo(10_000)
+        assertEquals(Fx.Kind.ECHO, t.playing!!.kind)
+        assertFalse(t.frame(10_000 + Fx.durationMs(Fx.Kind.ECHO)!!, 100, out))
+        assertTrue(out.all { it == 0 })
+        t.ember = true
+        t.presence = true
+        assertFalse(t.frame(20_000, 100, out)) // no effect, but the overlay is lit
+        assertTrue(out[0] > 0 && out[4 * 3] > 0 && out[2 * 3] == 0)
     }
 
     @Test fun holdShowsTheBatteryBarLikeTheButton() {

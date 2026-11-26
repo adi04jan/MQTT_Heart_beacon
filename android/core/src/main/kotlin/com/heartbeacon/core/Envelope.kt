@@ -21,6 +21,7 @@ object Envelope {
     val TYPES = setOf(
         "mood", "show", "shown", "rcpt", "tele", "state", "cfg", "time", "sleep", "get", "resp",
         "claim", "wifi.scan", "wifi.list", "wifi.set", "wifi.forget", "wifi.use", "link", "relay", "reset",
+        "streak", "presence", "batt",
     )
 
     /** `state.st` values, exact and lowercase (PROTOCOL.md 3); [LWT_STATE] only as the broker's will. */

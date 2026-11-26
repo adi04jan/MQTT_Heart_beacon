@@ -15,10 +15,13 @@
 #define HB_BATT_PERIOD_MS 30000     // battery sample period, also the longest the core sleeps between steps
 #define HB_PAIR_WINDOW_MS 120000    // pairing window after a 5 s hold or an unclaimed power-on
 #define HB_BTN_GRACE_MS 300000      // no schedule SLEEP within 5 min of a button wake or gesture
-#define HB_NAP_CHECKIN_MS 10000     // a NAP timer wake stays up this long
+#define HB_NAP_CHECKIN_MS 10000     // a NAP timer wake stays this long once its link is up (queued hearts arrive)
+#define HB_NAP_LINK_MS 45000        // and waits at most this long for the link (scan + TLS + CONNACK)
 #define HB_SEEN 16                  // `show` ids remembered for dedupe (PROTOCOL.md 3: ring of 16)
 #define HB_OUTBOX 4                 // moods waiting for an ack; a fifth drops the oldest
 #define HB_ACK_MS 5000              // PROTOCOL.md 4: no ack in 5 s, resend the same id on the other path
+#define HB_PHONE_SILENT_MS 600000   // nothing from a NEAR phone this long (it sends `time` every 4 min): its
+                                    // server link is presumed dead (Doze), so the BLE path ends and WiFi takes over
 
 typedef enum {  // plan "Power / States"; NAP, SLEEP and LOWBATT are deep sleep
     HB_ST_PAIRING,
@@ -30,9 +33,24 @@ typedef enum {  // plan "Power / States"; NAP, SLEEP and LOWBATT are deep sleep
     HB_ST_LOWBATT,
 } hb_state_t;
 
-typedef enum { HB_MOOD_NONE, HB_MOOD_HEART, HB_MOOD_SORRY, HB_MOOD_ANNOY } hb_mood_t;
+// Mood and show kinds. CUSTOM and TOGETHER are sent (tap then hold, a 2-5 s hold); ECHO and CELEBRATE are only ever
+// shown (the router's echo of your delivered heart, the circle's anniversary).
+typedef enum {
+    HB_MOOD_NONE,
+    HB_MOOD_HEART,
+    HB_MOOD_SORRY,
+    HB_MOOD_ANNOY,
+    HB_MOOD_CUSTOM,
+    HB_MOOD_TOGETHER,
+    HB_MOOD_ECHO,
+    HB_MOOD_CELEBRATE,
+} hb_mood_t;
+#define HB_MOODS 8
+#define HB_GOOD_MORNING_LEVEL 30  // percent: the last mood before a schedule sleep, replayed at the next start
 typedef enum { HB_PATH_NONE, HB_PATH_BLE, HB_PATH_WIFI } hb_path_t;
-typedef enum { HB_WAKE_POWERON, HB_WAKE_BUTTON, HB_WAKE_TIMER } hb_wake_t;
+// RESET: a crash, watchdog, brownout or software reset. The core in RTC memory is kept (outbox, dedupe ring)
+// and the start is quiet, like a timer wake: no battery bar, whose LED load can brown a weak cell out again.
+typedef enum { HB_WAKE_POWERON, HB_WAKE_BUTTON, HB_WAKE_TIMER, HB_WAKE_RESET } hb_wake_t;
 
 typedef enum {
     HB_EV_TICK,      // pressed = button level now (the port samples it for every tick)
@@ -40,12 +58,17 @@ typedef enum {
     HB_EV_TIME,      // ts = epoch seconds from the phone or router (`time` message)
     HB_EV_SHOW,      // k + id (`show` message): plays once per id, answers `shown` every time
     HB_EV_SLEEP,     // for_s (`sleep` message, 0 = until schedule on or button)
-    HB_EV_PATH,      // path = live server path reported by the BLE side (M4); WiFi comes from the link events
-    HB_EV_CLAIMED,   // claim accepted (closes the pairing window); radio stub until M4
+    HB_EV_BLE,       // up: an encrypted link to a bonded phone is up / the connection is gone
+    HB_EV_PHONE,     // up: the phone's server link (`link{up}` over BLE); BLE + phone up = the BLE path
+    HB_EV_PROV,      // up: a WiFi network and a server are provisioned now (claim, wifi.set/forget, reset)
+    HB_EV_CLAIMED,   // claim accepted: closes the pairing window
     HB_EV_ACK,       // id: an uplink was acked (WiFi: its PUBACK; BLE: the phone's `resp{re: id, ok: true}`)
     HB_EV_WIFI,      // up: WiFi has an IP / a join failed or the association dropped (hb_link)
     HB_EV_MQTT,      // up: CONNACK / the session failed or dropped (hb_link)
     HB_EV_CFG,       // cfg: a verified config to run on from now (hb_config_accept)
+    HB_EV_HELLO,     // any message from the phone over BLE: it is alive (HB_PHONE_SILENT_MS)
+    HB_EV_STREAK,    // mv = days in a row the whole circle sent a heart (`streak`): > 0 lights the ember
+    HB_EV_PRESENCE,  // up: another member's phone is near their beacon (`presence`)
 } hb_ev_type_t;
 
 typedef struct {
@@ -61,6 +84,8 @@ typedef struct {
         const hb_cfg_t *cfg;
     };
     uint64_t id;  // HB_EV_SHOW, HB_EV_ACK (hb_id_parse of the envelope id)
+    uint8_t rgb[3], pat;  // HB_EV_SHOW custom: the sender's colour and pattern
+    uint32_t at;          // HB_EV_SHOW together: epoch s the shared breathing is aligned to (0 = an invitation)
 } hb_ev_t;
 
 // One message for the port to send now (radio stub until M3).
@@ -76,7 +101,7 @@ typedef struct {
     uint32_t due;     // ack deadline of the last send
     uint8_t k;        // hb_mood_t
     uint8_t path;     // hb_path_t of the last send; HB_PATH_NONE = waiting for a path
-    uint8_t sends;    // 1: sent on one path; 2: on the other too, then parked until the next path report
+    uint8_t sends;    // sends so far: sets the resend spacing (5 s, 10, 20, 40, then 60 s)
 } hb_pend_t;
 
 typedef struct {
@@ -98,6 +123,7 @@ typedef struct {
     uint8_t n_up;
     bool measure_batt;              // read the battery and post HB_EV_BATT
     bool sleep;                     // enter deep sleep now; LEDs are dark, button wake on
+    bool factory_reset;             // erase everything (networks, claim, config, bonds) and restart
     uint32_t sleep_s;               // with a timer wake after this many seconds, 0 = button only
     uint8_t link;                   // hb_link_cmd_t for the WiFi / MQTT driver
     bool tele;                      // publish `tele` (on every connect, then every net.tele_min)
@@ -125,7 +151,17 @@ typedef struct {
     hb_pend_t out[HB_OUTBOX];   // moods sent or waiting to be, oldest first
     uint8_t n_out;
     hb_link_t link;
-    bool wifi_known;            // hb_boot_t.wifi
+    bool wifi_known;            // hb_boot_t.wifi, then HB_EV_PROV
+    bool ble, phone;            // encrypted BLE link up; the phone's last `link{up}` on it
+    bool near_off;              // WiFi stopped because the BLE path held net.near_hold_s (PROTOCOL.md 4)
+    bool checkin;               // a NAP timer wake waiting for its link
+    bool reset_pending;         // a 15 s hold: factory reset once the white flash ends and the button is up
+    uint16_t streak;            // `streak` n: > 0 lights the ember pixel when nothing plays
+    bool partner_near;          // `presence`: another member's phone is near their beacon (shown with led.presence)
+    hb_fx_t morning;            // the last mood played, kept for the good-morning replay (kind NONE = none)
+    uint32_t live_at;           // ms the BLE path came up
+    uint32_t wifi_due;          // ms WiFi comes back after the BLE path went (net.away_grace_s)
+    uint32_t phone_seen;        // ms of the last message from the phone over BLE
     bool report;                // the link just came up: report state even if unchanged
     uint32_t tele_due;          // ms deadline of the next `tele` while the link is up
 } hb_core_t;

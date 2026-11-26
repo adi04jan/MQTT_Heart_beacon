@@ -17,23 +17,31 @@ hb_btn_ev_t hb_btn_update(hb_btn_t *b, bool pressed, uint32_t now_ms)
         if (b->stable) {
             b->pressed_at = now_ms;
             b->holds = 0;
+            b->custom = false;
         } else if (b->swallow) {
             b->swallow = false;
         } else if (b->holds == 0) {
             b->taps += b->taps < 3;
             b->released_at = now_ms;
+        } else if (b->holds == 1 && !b->custom && now_ms - b->pressed_at >= HB_BTN_TOGETHER_MS) {
+            return HB_BTN_TOGETHER;  // let go between 2 s and 5 s
         }
     }
     if (b->stable) {
         uint32_t held = now_ms - b->pressed_at;
         if (b->holds == 0 && held >= HB_BTN_HOLD_MS) {
             b->holds = 1;
-            b->taps = 0;  // tap-then-hold is a hold
-            return HB_BTN_HOLD;
+            b->custom = b->taps > 0 && !b->swallow;  // a tap first: the custom mood, not the battery bar
+            b->taps = 0;
+            return b->custom ? HB_BTN_CUSTOM : HB_BTN_HOLD;
         }
         if (b->holds == 1 && held >= HB_BTN_PAIR_MS) {
             b->holds = 2;
             return HB_BTN_PAIR;
+        }
+        if (b->holds == 2 && held >= HB_BTN_RESET_MS) {
+            b->holds = 3;
+            return HB_BTN_RESET;
         }
     } else if (b->taps && now_ms - b->released_at >= HB_BTN_GAP_MS) {
         uint8_t n = b->taps;

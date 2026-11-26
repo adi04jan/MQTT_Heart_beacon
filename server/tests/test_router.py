@@ -108,8 +108,12 @@ def test_retry_on_other_path_after_10s_then_wait_for_the_beacon():
     retry = tick(st, 1010)
     assert [(t, p["t"], p["m"]["id"]) for t, p in retry] == [("hb/v1/u/bob/down", "relay", EID)]
     assert tick(st, 1019) == []
-    assert tick(st, 1020) == []  # both paths tried: pending, beacon unreachable
+    ping = tick(st, 1020)  # both paths tried: pending, unreachable, and asked `get info` on both paths
     assert st.deliveries[0].status == "pending" and st.beacons[B].live() is None
+    assert [(t, p["t"]) for t, p in ping] == [(f"hb/v1/d/{B}/down", "get"), ("hb/v1/u/bob/down", "relay")]
+    assert ping[1][1]["m"]["t"] == "get"
+    assert tick(st, 1020 + 119) == []
+    assert [p["t"] for _, p in tick(st, 1020 + 120)] == ["get", "relay"]  # again every 2 min while hearts wait
     flush = send(st, f"hb/v1/d/{B}/up", env("tele", "2" * 16, mv=3900), now=1100)  # any uplink: reachable again
     assert only(flush, f"hb/v1/d/{B}/down") == [{"v": 1, "t": "show", "id": EID, "ts": 1100, "k": "heart"}]
 
@@ -359,3 +363,78 @@ def test_glue_picks_up_users_and_claims_written_by_the_admin_cli(tmp_path):
     cli.x("INSERT INTO device (did, owner, claimed, registered) VALUES (?, 'bob', 1, 0)", (B,))
     g.poll()
     assert set(g.state.users) == {"bob"} and g.state.beacons[B].owner == "bob"
+
+
+# ---- review ideas 2026-11-26: custom, echo, together, presence, battery nudge, streak, anniversary ----
+
+def test_custom_mood_carries_its_colour_to_the_show_and_the_phone():
+    st = mkstate()
+    up(st, B)
+    pubs = send(st, "hb/v1/u/alice/up", env("mood", EID, k="custom", rgb="#0a14c8", pat=1))
+    assert only(pubs, f"hb/v1/d/{B}/down")[0] == {"v": 1, "t": "show", "id": EID, "ts": 1000, "k": "custom",
+                                                    "rgb": "#0a14c8", "pat": 1}
+    assert only(pubs, "hb/v1/u/bob/down")[0]["rgb"] == "#0a14c8"
+
+
+def test_shown_echoes_a_soft_pulse_on_the_senders_own_beacon():
+    st = mkstate()
+    up(st, A)
+    up(st, B)
+    send(st, "hb/v1/u/alice/up", env("mood", EID, k="heart"))
+    pubs = send(st, f"hb/v1/d/{B}/up", env("shown", EID), now=1001)
+    echo = only(pubs, f"hb/v1/d/{A}/down")
+    assert [p["k"] for p in echo] == ["echo"] and echo[0]["id"] != EID
+
+
+def test_together_within_10s_breathes_both_circles_beacons_in_step():
+    st = mkstate()
+    up(st, A)
+    up(st, B)
+    send(st, "hb/v1/u/alice/up", env("mood", "00000000000000b1", k="together"), now=1000)
+    pubs = send(st, f"hb/v1/d/{B}/up", env("mood", "00000000000000b2", k="together"), now=1006)
+    synced = [p for t, p, *_ in pubs if t in (f"hb/v1/d/{A}/down", f"hb/v1/d/{B}/down") and p.get("at")]
+    assert len(synced) == 2 and all(p["k"] == "together" and p["at"] == 1008 for p in synced)
+    late = send(st, "hb/v1/u/alice/up", env("mood", "00000000000000b3", k="together"), now=1100)
+    assert not any(p.get("at") for _, p, *_ in late)  # alone again: just an invitation
+
+
+def test_presence_and_battery_nudge_reach_the_other_member_only():
+    st = mkstate()
+    up(st, B)
+    pubs = up(st, A, "ble")  # alice's phone is near her beacon
+    pres = only(pubs, "hb/v1/u/bob/down")
+    assert [p for p in pres if p["t"] == "presence"] == [
+        {"v": 1, "t": "presence", "id": pres[0]["id"], "ts": 1000, "uid": "alice", "near": True}]
+    assert any(p["t"] == "presence" for p in only(pubs, f"hb/v1/d/{B}/down"))
+    assert not only(pubs, "hb/v1/u/alice/down") or all(p["t"] != "presence" for p in only(pubs, "hb/v1/u/alice/down"))
+    low = send(st, f"hb/v1/d/{A}/up", env("tele", "3" * 16, mv=3400, pct=12), now=1100)
+    assert [p for p in only(low, "hb/v1/u/bob/down") if p["t"] == "batt"][0]["pct"] == 12
+    again = send(st, f"hb/v1/d/{A}/up", env("tele", "4" * 16, mv=3400, pct=11), now=1200)
+    assert not any(p["t"] == "batt" for p in only(again, "hb/v1/u/bob/down"))  # once
+
+
+def test_streak_counts_days_both_sent_and_breaks_on_a_missed_day():
+    st = mkstate()
+    up(st, A)
+    up(st, B)
+    day = 86400
+    t0 = 20000 * day  # midnight IST is 18:30 UTC; these stay mid-day
+    for i in range(3):
+        send(st, "hb/v1/u/alice/up", env("mood", f"{i:015x}a", k="heart"), now=t0 + i * day)
+        pubs = send(st, "hb/v1/u/bob/up", env("mood", f"{i:015x}b", k="heart"), now=t0 + i * day + 60)
+    assert st.streak["home"] == 3
+    assert any(p["t"] == "streak" and p["n"] == 3 for p in only(pubs, f"hb/v1/d/{A}/down"))
+    tick(st, t0 + 5 * day)  # two days with nothing: broken
+    assert st.streak.get("home", 0) == 0
+
+
+def test_anniversary_plays_celebrate_once_on_its_minute():
+    import calendar
+    st = mkstate()
+    up(st, A)
+    up(st, B)
+    st.anniv = {"home": "02-14 09:00"}
+    at = calendar.timegm((2027, 2, 14, 9, 0, 0)) - 330 * 60  # 09:00 IST
+    pubs = tick(st, at + 10)
+    assert sorted(t for t, p in pubs if p.get("k") == "celebrate") == [f"hb/v1/d/{A}/down", f"hb/v1/d/{B}/down"]
+    assert not [p for _, p in tick(st, at + 20) if p.get("k") == "celebrate"]

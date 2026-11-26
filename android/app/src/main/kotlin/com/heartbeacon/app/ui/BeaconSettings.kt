@@ -74,6 +74,8 @@ fun LazyListScope.beaconSettings(
     near: Boolean,
     update: (DeviceSettings) -> Unit,
     forget: (String) -> Unit,
+    onPreview: (Int?) -> Unit = {},
+    workshop: String? = null,
     open: (SettingsDialog) -> Unit,
 ) {
     val start = LocalTime.parse(cur.start)
@@ -98,13 +100,32 @@ fun LazyListScope.beaconSettings(
     item { SectionTitle("Light and power") }
     item {
         Group {
-            Brightness(cur.bright) { update(cur.copy(bright = it)) }
+            Brightness(cur.bright, onPreview) { update(cur.copy(bright = it)) }
             Line()
             SwitchRow(
                 "Nap when idle",
                 "After 90 minutes with no hearts it naps and checks in every 15 minutes. Saves battery; hearts can take up to 15 minutes.",
                 cur.napWhenIdle,
             ) { update(cur.copy(napWhenIdle = it)) }
+        }
+    }
+
+    item { SectionTitle("Your colour") }
+    item {
+        Group {
+            Swatches(cur.moodRgb) { update(cur.copy(moodRgb = it)) }
+            Line()
+            SwitchRow(
+                "Breathe",
+                "Tap then hold the button to send your colour. Off: three pulses, like a heart. On: three slow breaths.",
+                cur.moodPat == 1,
+            ) { update(cur.copy(moodPat = if (it) 1 else 0)) }
+            Line()
+            SwitchRow(
+                "When they're near",
+                "A faint light at the top of the heart while their phone is near their beacon.",
+                cur.presence,
+            ) { update(cur.copy(presence = it)) }
         }
     }
 
@@ -146,6 +167,10 @@ fun LazyListScope.beaconSettings(
                 if (cur.fw.isEmpty()) "Version not reported yet" else "Version ${cur.fw}",
                 cur.fwAvailable?.let { "$it is ready. It installs itself over Wi-Fi with at least 70% battery." } ?: "Up to date",
             )
+            if (workshop != null) {  // review U4: the raw numbers, for when something needs looking into
+                Line()
+                ItemRow("Workshop", workshop)
+            }
         }
     }
     item {
@@ -299,8 +324,34 @@ private fun Days(days: String, enabled: Boolean, onChange: (String) -> Unit) {
     }
 }
 
+/** The custom mood's colour: a few LED colours that read well through brass, not a full picker. */
+private val SWATCHES = listOf("#ff4fa3", "#9b5cff", "#1fc8b4", "#ffb020", "#ff5a1f", "#7ad151")
+
 @Composable
-private fun Brightness(value: Int, onDone: (Int) -> Unit) {
+private fun Swatches(value: String, onPick: (String) -> Unit) {
+    Column(Modifier.padding(start = Space.l, end = Space.l, top = Space.l, bottom = Space.m)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            for (hex in SWATCHES) {
+                val c = Color(android.graphics.Color.parseColor(hex))
+                val on = hex.equals(value, ignoreCase = true)
+                Box(
+                    Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .border(if (on) 3.dp else 1.dp, if (on) MaterialTheme.colorScheme.brass else MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                        .clickable(role = Role.RadioButton, onClickLabel = "Use this colour") { onPick(hex) }
+                        .padding(7.dp)
+                        .clip(CircleShape)
+                        .background(c)
+                        .semantics { contentDescription = "Colour $hex" + if (on) ", chosen" else "" },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun Brightness(value: Int, onPreview: (Int?) -> Unit, onDone: (Int) -> Unit) {
     var v by remember(value) { mutableFloatStateOf(value.toFloat()) }
     Column(Modifier.padding(start = Space.l, end = Space.l, top = Space.l, bottom = Space.xs)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -309,9 +360,9 @@ private fun Brightness(value: Int, onDone: (Int) -> Unit) {
         }
         Slider(
             value = v,
-            onValueChange = { v = it },
+            onValueChange = { v = it; onPreview(it.toInt()) },
             valueRange = 5f..100f,
-            onValueChangeFinished = { onDone(v.toInt()) },
+            onValueChangeFinished = { onDone(v.toInt()); onPreview(null) },
             colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.brass, activeTrackColor = MaterialTheme.colorScheme.brass),
             modifier = Modifier.semantics { contentDescription = "Brightness" },
         )

@@ -93,7 +93,7 @@ static void test_known_types(void)
     cJSON_ArrayForEach(t, section("envelope", "types")) {
         TEST_ASSERT_TRUE_MESSAGE(hb_msg_known_type(t->valuestring), t->valuestring);
     }
-    TEST_ASSERT_EQUAL_INT(20, cJSON_GetArraySize(section("envelope", "types")));
+    TEST_ASSERT_EQUAL_INT(23, cJSON_GetArraySize(section("envelope", "types")));  // + streak, presence, batt
     TEST_ASSERT_FALSE(hb_msg_known_type("dance"));
     TEST_ASSERT_FALSE(hb_msg_known_type(""));
 }
@@ -328,7 +328,14 @@ static cJSON *cfg_json(const hb_cfg_t *c)
     }
     cJSON_AddNumberToObject(b, "api", c->api);
     cJSON_AddStringToObject(j, "name", c->name);
-    cJSON_AddNumberToObject(cJSON_AddObjectToObject(j, "led"), "bright", c->bright);
+    cJSON *led = cJSON_AddObjectToObject(j, "led");
+    cJSON_AddNumberToObject(led, "bright", c->bright);
+    cJSON_AddBoolToObject(led, "presence", c->presence);
+    cJSON *mood = cJSON_AddObjectToObject(j, "mood");
+    char rgb[8];
+    snprintf(rgb, sizeof rgb, "#%02x%02x%02x", c->mood_rgb[0], c->mood_rgb[1], c->mood_rgb[2]);
+    cJSON_AddStringToObject(mood, "rgb", rgb);
+    cJSON_AddNumberToObject(mood, "pat", c->mood_pat);
     b = cJSON_AddObjectToObject(j, "sched");
     cJSON_AddBoolToObject(b, "on", c->sched_on);
     cJSON_AddNumberToObject(b, "tz", c->tz_min);
@@ -544,13 +551,14 @@ static void test_cfg_message_accepts_once_and_rejects_bad_sig_old_n_wrong_did(vo
 // "fx": every frame the app's Kotlin port is checked against comes from this code.
 static void test_fx_frames(void)
 {
-    static const char *kinds[] = {"none", "heart", "sorry", "annoy", "pair", "batt", "low"};
+    static const char *kinds[] = {"none", "heart",  "sorry", "annoy",     "pair",  "batt",
+                                  "low",  "reset", "echo",  "breath", "celebrate", "custom"};
     const cJSON *c;
     int n = 0;
     cJSON_ArrayForEach(c, cJSON_GetObjectItem(cJSON_GetObjectItem(g_vec, "fx"), "cases")) {
         const char *k = cJSON_GetObjectItem(c, "kind")->valuestring;
         int kind = -1;
-        for (int i = 0; i < 7; i++) {
+        for (int i = 0; i < (int)(sizeof kinds / sizeof kinds[0]); i++) {
             if (strcmp(k, kinds[i]) == 0) {
                 kind = i;
             }
@@ -559,6 +567,13 @@ static void test_fx_frames(void)
         hb_fx_t fx;
         uint8_t rgb[HB_PIXELS][3];
         hb_fx_start(&fx, (hb_fx_kind_t)kind, (uint8_t)cJSON_GetObjectItem(c, "arg")->valueint, 5000);
+        const cJSON *lv = cJSON_GetObjectItem(c, "level"), *col = cJSON_GetObjectItem(c, "color");
+        if (lv) {
+            fx.level = (uint8_t)lv->valueint;  // a dimmed replay
+        }
+        for (int k = 0; col && k < 3; k++) {
+            fx.rgb[k] = (uint8_t)cJSON_GetArrayItem(col, k)->valueint;  // a custom mood's colour
+        }
         bool more = hb_fx_frame(&fx, 5000u + (uint32_t)cJSON_GetObjectItem(c, "t")->valueint,
                                 (uint8_t)cJSON_GetObjectItem(c, "bright")->valueint, rgb);
         TEST_ASSERT_EQUAL(cJSON_IsTrue(cJSON_GetObjectItem(c, "more")), more);
@@ -570,7 +585,7 @@ static void test_fx_frames(void)
         }
         n++;
     }
-    TEST_ASSERT_GREATER_THAN(40, n);
+    TEST_ASSERT_GREATER_THAN(90, n);
 }
 
 int main(void)

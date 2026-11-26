@@ -22,13 +22,15 @@ from .db import Db
 from .router import Pub
 
 SESSION_S = 365 * 24 * 3600
+SESSIONS_PER_USER = 10  # newest kept on each login; older devices log in again
 log = logging.getLogger("hb.api")
 CLAIMS = 10  # claim attempts per user per auth.WINDOW_S, then 429 (login limits live in auth.Guard)
 UID = re.compile(r"[a-z][a-z0-9_]{0,31}")  # never collides with a did (HB-XXXXXX) in the ACL's %u patterns
 DID = re.compile(r"HB-[0-9A-F]{6}")
 FW_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}")
 # What a user may change from the app (plan: Config schema v1, "Who edits"); everything else is admin-only.
-USER_KEYS = {"name": None, "led": {"bright"}, "sched": {"on", "tz", "days", "start", "stop"},
+USER_KEYS = {"name": None, "led": {"bright", "presence"}, "mood": {"rgb", "pat"},
+             "sched": {"on", "tz", "days", "start", "stop"},
              "pwr": {"idle_nap_min"}, "net": {"use_wifi"}}
 # Seed for every new beacon: the office schedule, Mon-Sat 09:00-19:00 IST.
 SEED_SCHED = {"on": True, "tz": 330, "days": "1111110", "start": "09:00", "stop": "19:00"}
@@ -44,6 +46,7 @@ class Ctx:
     passwd: str | None = None  # broker password_file; None = don't write one
     router_hash: str = ""
     fw_dir: str = "fw"
+    tls_cert: str = ""  # the API and broker leaf (PEM): its expiry is watched (review S4)
     publish: Callable[[list[Pub]], None] = lambda pubs: None
     refresh: Callable[[], None] = lambda: None
     reload: Callable[[], None] = lambda: None
@@ -76,6 +79,22 @@ def register(ctx: Ctx, did: str, assign: str | None = None) -> None:
     ctx.db.x("INSERT OR IGNORE INTO device (did, registered) VALUES (?, ?)", (did, int(ctx.clock())))
     if assign is not None:
         assign_to(ctx, did, assign)
+
+
+CERT_WARN_DAYS = 60
+
+
+def cert_days_left(path: str, now: float) -> int | None:
+    """Whole days until the PEM certificate at `path` expires (negative once expired); None if unreadable.
+    The leaf from deploy/mkca.sh lasts 825 days and nothing else tells anyone it is running out."""
+    from cryptography import x509
+
+    try:
+        with open(path, "rb") as f:
+            cert = x509.load_pem_x509_certificate(f.read())
+    except (OSError, ValueError):
+        return None
+    return int((cert.not_valid_after_utc.timestamp() - now) // 86400)
 
 
 def assign_to(ctx: Ctx, did: str, uid: str | None) -> None:
@@ -190,7 +209,13 @@ def create_app(ctx: Ctx) -> FastAPI:
             raise HTTPException(401, "bad_login")
         ctx.guard.login_ok(ip, token)
         tok = auth.new_secret()
-        db.x("INSERT INTO session VALUES (?, ?, ?)", (_token_hash(tok), row["uid"], int(ctx.clock())))
+        now = int(ctx.clock())
+        db.x("INSERT INTO session VALUES (?, ?, ?)", (_token_hash(tok), row["uid"], now))
+        # Sweep (review S2): expired sessions go, and a user keeps at most SESSIONS_PER_USER.
+        db.x("DELETE FROM session WHERE created <= ?", (now - SESSION_S,))
+        db.x("DELETE FROM session WHERE uid = ? AND token NOT IN "
+             "(SELECT token FROM session WHERE uid = ? ORDER BY created DESC, rowid DESC LIMIT ?)",
+             (row["uid"], row["uid"], SESSIONS_PER_USER))
         return {"token": tok, "uid": row["uid"], "name": row["name"],
                 "mqtt": {"host": ctx.hosts[0], "port": ctx.mport, "user": row["uid"], "pass": row["mqtt_pass"]}}
 

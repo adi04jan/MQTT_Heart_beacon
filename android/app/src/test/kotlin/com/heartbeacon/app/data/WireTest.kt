@@ -50,10 +50,13 @@ class WireTest {
         val d = settingsOf(s, fw = "2.0.0", wifi = listOf("Office"), fwTarget = "2.0.1")
         assertEquals(DeviceSettings("Desk", listOf("Office"), false, true, "1111110", "09:00", "19:00", 40, true, "2.0.0", "2.0.1"), d)
         assertNull(settingsOf(s, "2.0.1", emptyList(), "2.0.1").fwAvailable) // already running it
-        val body = settingsBody(d.copy(bright = 70), napMinOf(s))
+        val body = settingsBody(d.copy(bright = 70), napMinOf(s), was = d)  // unchanged new keys stay out
         assertEquals(obj("""{"name":"Desk","led":{"bright":70},"sched":{"on":true,"days":"1111110","start":"09:00","stop":"19:00"},
             "pwr":{"idle_nap_min":120},"net":{"use_wifi":false}}"""), body)
         assertEquals(JsonPrimitive(90), settingsBody(d, 0)["pwr"]!!.jsonObject["idle_nap_min"])
+        val breathe = settingsBody(d.copy(moodPat = 1), 0, was = d)  // a changed new key does go
+        assertEquals(JsonPrimitive(1), breathe["mood"]!!.jsonObject["pat"])
+        assertEquals(JsonPrimitive(false), breathe["led"]!!.jsonObject["presence"])
         assertEquals(JsonPrimitive(0), settingsBody(d.copy(napWhenIdle = false), 120)["pwr"]!!.jsonObject["idle_nap_min"])
     }
 

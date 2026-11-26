@@ -14,7 +14,7 @@ enable_testing()
 
 set(HB_CORE "${CMAKE_CURRENT_SOURCE_DIR}/../../components/hb_core")
 set(HB_VECTORS "${CMAKE_CURRENT_SOURCE_DIR}/../../../protocol/vectors.json")
-set(HB_CERTS "${CMAKE_CURRENT_SOURCE_DIR}/../../main/certs")
+set(HB_CERTS "${CMAKE_CURRENT_SOURCE_DIR}/../certs")  # test-only CA and the vectors config key
 
 file(TO_CMAKE_PATH "$ENV{IDF_PATH}" idf_env)
 find_path(HB_MBEDTLS_DIR include/mbedtls/pk.h NO_DEFAULT_PATH

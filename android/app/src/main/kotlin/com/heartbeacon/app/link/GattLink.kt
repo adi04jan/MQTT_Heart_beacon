@@ -27,6 +27,8 @@ class GattLink(private val ctx: Context, private val mac: String, private val li
         /** Link usable (connected, discovered, MTU set, TX notifications on) or lost. */
         fun onLink(up: Boolean, mtu: Int)
         fun onFrame(frame: ByteArray)
+        /** TX subscription refused: the beacon no longer knows this phone (factory reset, or its 4th bond). */
+        fun onBondLost() {}
     }
 
     private var gatt: BluetoothGatt? = null
@@ -60,7 +62,12 @@ class GattLink(private val ctx: Context, private val mac: String, private val li
         val c = rx ?: return
         val f = queue.removeFirstOrNull() ?: return
         writing = true
-        val rc = g.writeCharacteristic(c, f, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+        // Fragments with more to follow go without response (one connection event per message instead of one per
+        // frame); the last one is acknowledged. Only if the beacon's RX allows it (firmware from 2026-11-26 on).
+        val more = f.isNotEmpty() && f[0].toInt() and 0x80 != 0
+        val noRsp = more && c.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+        val type = if (noRsp) BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE else BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        val rc = g.writeCharacteristic(c, f, type)
         if (rc != BluetoothStatusCodes.SUCCESS) {
             Log.w(TAG, "write refused ($rc); dropping the rest of this burst")
             queue.clear() // the beacon's reassembler drops the partial; the relay's timers cover the loss
@@ -102,8 +109,10 @@ class GattLink(private val ctx: Context, private val mac: String, private val li
 
         override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
+                // Not disconnect(): on an autoConnect GATT that cancels reconnecting for good. The owner closes
+                // this GATT, says so in the app, and opens a fresh one later.
                 Log.w(TAG, "CCCD write failed ($status): bond or encryption problem")
-                g.disconnect()
+                listener.onBondLost()
                 return
             }
             synchronized(this@GattLink) { rx = g.getService(SERVICE)?.getCharacteristic(RX) }

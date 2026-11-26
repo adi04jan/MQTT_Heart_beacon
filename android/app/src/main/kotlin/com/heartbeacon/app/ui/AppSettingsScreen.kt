@@ -108,6 +108,8 @@ fun AppSettingsScreen(vm: AppSettingsVm, onBack: () -> Unit) {
                             Mood.HEART -> "Heart"
                             Mood.SORRY -> "Sorry"
                             Mood.ANNOY -> "Annoy"
+                            Mood.CUSTOM -> "Colour"
+                            Mood.TOGETHER -> "Together"
                         }
                         if (i > 0) Line()
                         SwitchRow(label, if (m == Mood.HEART) "When someone in your circle sends one" else null, local?.notify?.get(m) ?: true) {

@@ -3,7 +3,8 @@ package com.heartbeacon.app.data
 import com.heartbeacon.core.Envelope
 import kotlinx.coroutines.flow.StateFlow
 
-enum class Mood(val wire: String) { HEART("heart"), SORRY("sorry"), ANNOY("annoy") }
+/** What a person sends. CUSTOM is their own colour (`mood.rgb` / `mood.pat`); TOGETHER asks to breathe together. */
+enum class Mood(val wire: String) { HEART("heart"), SORRY("sorry"), ANNOY("annoy"), CUSTOM("custom"), TOGETHER("together") }
 
 /** The beacon card's one line of state. */
 sealed interface Presence {
@@ -32,12 +33,18 @@ data class Beacon(
     val lastSeenEpochMs: Long?,
     /** Wi-Fi signal from the last `tele`, dBm. */
     val rssi: Int? = null,
+    /** The beacon refused this phone's bond: hold its button 5 s to pair again. */
+    val needsPair: Boolean = false,
+    /** Days in a row everyone in the circle sent a heart (`streak`); the cage's ember. */
+    val streak: Int = 0,
+    /** Another member's phone is near their beacon (`presence`). */
+    val partnerNear: Boolean = false,
 )
 
 /** Delivery mark on an event the user sent (PROTOCOL `rcpt.st`). Null for events received. */
 enum class Mark { QUEUED, SHOWN, EXPIRED }
 
-data class Event(val id: String, val mood: Mood, val from: String?, val atEpochMs: Long, val mark: Mark?)
+data class Event(val id: String, val mood: Mood, val from: String?, val atEpochMs: Long, val mark: Mark?, val rgb: String? = null)
 
 enum class ServerLink { CONNECTED, CONNECTING, OFFLINE }
 
@@ -56,6 +63,11 @@ data class DeviceSettings(
     val napWhenIdle: Boolean,
     val fw: String,
     val fwAvailable: String?,
+    /** The custom mood: colour "#rrggbb" and pattern (0 pulses, 1 breaths). */
+    val moodRgb: String = "#ff4fa3",
+    val moodPat: Int = 0,
+    /** A faint pixel while another member's phone is near their beacon. */
+    val presence: Boolean = false,
 )
 
 data class WifiNet(val ssid: String, val rssi: Int, val secure: Boolean)

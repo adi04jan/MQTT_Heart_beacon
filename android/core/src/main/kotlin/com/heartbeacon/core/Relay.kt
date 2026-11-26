@@ -58,6 +58,11 @@ class RelayEngine(
     var dropped = 0
         private set
 
+    /** For the log: link flags and what waits for a PUBACK (id and age) or for the server. */
+    fun debug(now: Long): String =
+        "server=$serverUp ble=$bleUp inflight=${inflight.entries.joinToString { "${it.key}:${now - it.value.second}ms" }} " +
+            "outbox=${outbox.size} held=${held.size} dropped=$dropped"
+
     /** [ackRe]: the beacon message this `relay` carries, acked to the beacon on PUBACK. */
     private class Queued(val id: String, val payload: ByteArray, val ackRe: String? = null)
     private class Held(val msg: ByteArray, val at: Long)
@@ -66,6 +71,9 @@ class RelayEngine(
     private val inflight = LinkedHashMap<String, Pair<Queued, Long>>()
     private val held = ArrayDeque<Held>()
     private val ownRequests = LinkedHashSet<String>()
+    private var timeAt = 0L // last `time` written to the beacon
+    private var stuck = 0 // forced reconnects in a row with no PUBACK in between: the watchdog backs off
+    private val ownShows = LinkedHashSet<String>() // moods this phone played on its own beacon: their `shown` stays here
     private val rx = Reassembler()
     private var mtu = Frames.MIN_MTU
     private var seq = 0
@@ -93,6 +101,7 @@ class RelayEngine(
         if (up) {
             // Time comes from the phone on every BLE connect (plan, decision 8).
             out += toBeacon(env("time", now, "tz" to JsonPrimitive(tzMin())))
+            timeAt = now
             out += toBeacon(env("link", now, "up" to JsonPrimitive(serverUp)))
             held.filter { now - it.at <= DOWN_HOLD_MS }.forEach { out += toBeacon(it.msg) }
             held.clear()
@@ -111,6 +120,7 @@ class RelayEngine(
         } catch (e: ProtocolException) {
             return emptyList() // a beacon never answers junk; neither do we
         }
+        if (msg.t == "shown" && ownShows.remove(msg.id)) return emptyList() // our own glow, not a delivery
         if (msg.t == "resp" && ownRequests.remove(msg.body["re"]?.jsonPrimitive?.content)) {
             return listOf(RelayOut.Local(msg))
         }
@@ -154,8 +164,21 @@ class RelayEngine(
     }
 
     /** The app's own Heart / Sorry / Annoy. Works with no beacon at all. [id] is the event id `rcpt` will carry. */
-    fun sendMood(k: String, now: Long, id: String = newId()): List<RelayOut> =
-        uplink(env("mood", now, "k" to JsonPrimitive(k), id = id), now)
+    fun sendMood(k: String, now: Long, id: String = newId(), extra: JsonObject = JsonObject(emptyMap())): List<RelayOut> {
+        val out = mutableListOf<RelayOut>()
+        // The router delivers only to the *other* members, so the sender's own beacon glows from here, as it does
+        // for its own button: a `show` with the mood's id (the beacon's dedupe ring stops any second play).
+        if (bleUp && did != null) {
+            ownShows += id
+            if (ownShows.size > 16) ownShows.remove(ownShows.first())
+            out += toBeacon(Envelope.encode("show", id, now / 1000, buildJsonObject {
+                put("k", JsonPrimitive(k))
+                extra.forEach { (kk, v) -> put(kk, v) }
+            }))
+        }
+        out += uplink(env("mood", now, "k" to JsonPrimitive(k), *extra.map { it.key to it.value }.toTypedArray(), id = id), now)
+        return out
+    }
 
     /** A request from the app to the beacon (`get`, `wifi.*`, `claim`, ...); its `resp` comes back as [RelayOut.Local]. */
     fun request(t: String, body: JsonObject, now: Long, id: String = newId()): List<RelayOut> {
@@ -167,6 +190,7 @@ class RelayEngine(
 
     /** The broker PUBACKed publish [id]. For a relayed beacon message, the beacon gets its ack. */
     fun published(id: String, now: Long): List<RelayOut> {
+        stuck = 0
         val re = inflight.remove(id)?.first?.ackRe ?: return emptyList()
         if (!bleUp) return emptyList() // the beacon has moved on to WiFi; the router dedupes
         return listOf(toBeacon(env("resp", now, "re" to JsonPrimitive(re), "ok" to JsonPrimitive(true))))
@@ -175,8 +199,17 @@ class RelayEngine(
     /** Call at least once a second while anything is in flight or held. */
     fun tick(now: Long): List<RelayOut> {
         held.removeAll { now - it.at > DOWN_HOLD_MS }
-        if (inflight.values.none { now - it.second >= ACK_MS }) return emptyList()
-        val out = mutableListOf<RelayOut>(RelayOut.ReconnectServer)
+        val out = mutableListOf<RelayOut>()
+        // The beacon counts a NEAR phone as alive only while it hears from it (firmware HB_PHONE_SILENT_MS, 10 min):
+        // a `time` every 4 min. In Doze this stops, and the beacon's own WiFi takes over.
+        if (bleUp && now - timeAt >= TIME_EVERY_MS) {
+            out += toBeacon(env("time", now, "tz" to JsonPrimitive(tzMin())))
+            timeAt = now
+        }
+        val wait = ACK_WAIT[minOf(stuck, ACK_WAIT.size - 1)] // 5 s, then 15 s, then 60 s: no TLS thrash on a slow link
+        if (inflight.values.none { now - it.second >= wait }) return out
+        stuck++
+        out += RelayOut.ReconnectServer
         out += serverChanged(false, now)
         return out
     }
@@ -220,9 +253,13 @@ class RelayEngine(
     companion object {
         /** PROTOCOL.md 4: no ack in 5 s -> the other path. */
         const val ACK_MS = 5_000L
+        /** No-PUBACK watchdog per forced reconnect in a row: [ACK_MS] first, then longer on a link that stays slow. */
+        val ACK_WAIT = longArrayOf(ACK_MS, 15_000L, 60_000L)
         /** PROTOCOL.md 4: the router tries the other path after 10 s without `shown`. */
         const val DOWN_HOLD_MS = 10_000L
         const val HELD_CAP = 16
+        /** A `time` to a NEAR beacon this often: its sign of life (the beacon gives up after 10 min). */
+        const val TIME_EVERY_MS = 4 * 60_000L
     }
 }
 

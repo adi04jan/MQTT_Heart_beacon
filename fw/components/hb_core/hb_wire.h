@@ -17,6 +17,7 @@ typedef struct {
     const char *fw, *hw, *rst;  // `tele` and `get info`
     int rssi;                   // dBm of the AP, 0 = unknown
     uint32_t heap;              // free heap, bytes
+    bool dump;                  // a core dump waits in flash (`tele` says so until it is read and erased)
     const uint8_t *cfg_key;     // pinned config key: SubjectPublicKeyInfo, PEM (NUL counted) or DER
     size_t cfg_key_len;
 } hb_wire_ctx_t;
@@ -44,6 +45,27 @@ int hb_wire_will(hb_core_t *c, uint32_t now_ms, char *buf, size_t cap);
 void hb_wire_emit(hb_core_t *c, const hb_actions_t *a, const hb_wire_ctx_t *x, uint32_t now_ms, hb_pub_fn pub,
                   void *arg);
 
+// A BLE-only request the port carries out (NVS, WiFi driver, BLE bonds), then answers with hb_wire_resp.
+// hb_wire has already checked the fields and refused what is malformed or not allowed.
+typedef enum {
+    HB_CMD_NONE,
+    HB_CMD_CLAIM,        // host, mport, aport, user, pass; replaces any earlier claim
+    HB_CMD_WIFI_SCAN,    // resp d: {nets: [{ssid, rssi, sec}]}
+    HB_CMD_WIFI_LIST,    // resp d: {ssids: [...]} (PSKs are never read back)
+    HB_CMD_WIFI_SET,     // ssid, psk: store (max 4), join, answer with the result
+    HB_CMD_WIFI_FORGET,  // ssid
+    HB_CMD_RESET,        // factory: everything incl. bonds; else the WiFi networks only
+} hb_cmd_type_t;
+
+typedef struct {
+    hb_cmd_type_t type;
+    char re[HB_ID_LEN + 1];  // the request id, for the resp
+    char host[65], user[33], pass[65];
+    uint16_t mport, aport;
+    char ssid[33], psk[64];
+    bool factory;
+} hb_cmd_t;
+
 typedef struct {
     bool has_ev;              // step hb_core with ev
     hb_ev_t ev;
@@ -51,6 +73,7 @@ typedef struct {
     hb_cfg_t cfg;             // HB_EV_CFG points here
     uint8_t raw[HB_CFG_MAX];  // the accepted config's bytes, for the port to persist
     size_t raw_len;
+    hb_cmd_t cmd;             // BLE only: a request for the port
 } hb_rx_t;
 
 // One message the broker delivered on d/{did}/down or d/{did}/cfg (other topics are ignored). `get info`
@@ -58,3 +81,13 @@ typedef struct {
 // rx->ev. Anything that fails the envelope checks is dropped unanswered (PROTOCOL.md 2.2).
 void hb_wire_rx(hb_core_t *c, const hb_wire_ctx_t *x, const char *topic, const char *data, size_t len,
                 uint32_t now_ms, hb_rx_t *rx, hb_pub_fn pub, void *arg);
+
+// One message the phone wrote over the encrypted BLE link. As hb_wire_rx, answered on BLE, plus: `cfg`
+// (answered with resp), `link` (HB_EV_PHONE), the phone's `resp` ack (HB_EV_ACK), and the BLE-only
+// requests (claim, wifi.*, reset) as rx->cmd for the port.
+void hb_wire_ble_rx(hb_core_t *c, const hb_wire_ctx_t *x, const char *data, size_t len, uint32_t now_ms,
+                    hb_rx_t *rx, hb_pub_fn pub, void *arg);
+
+// resp{re, ok, err (when not ok), d (when given; taken over and freed)} on path.
+void hb_wire_resp(hb_core_t *c, const hb_wire_ctx_t *x, const char *re, bool ok, const char *err, cJSON *d,
+                  uint32_t now_ms, hb_path_t path, hb_pub_fn pub, void *arg);
