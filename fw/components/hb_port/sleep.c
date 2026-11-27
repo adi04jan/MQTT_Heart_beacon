@@ -27,7 +27,7 @@ esp_err_t hb_sleep_auto_light(void)
 void hb_sleep_deep(uint32_t secs)
 {
     hb_led_park();
-#if CONFIG_HB_HW_B
+#if CONFIG_HB_HW_B || CONFIG_HB_HW_C
     // GPIO0-5 keep their pad setting through deep sleep, and a weak pull-up (~45k) would leak 25-75 uA here:
     // GPIO5 is tied to GND, GPIO1 sees the LIS3DH INT1 (idle low), GPIO3 the USB-sense divider. Float them and
     // hold that. A future LIS3DH wake on GPIO1 must gpio_hold_dis() it first.

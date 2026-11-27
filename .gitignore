@@ -10,8 +10,12 @@ android/local.properties
 android/app/build/
 fw/build/
 fw/build-b/
+fw/build-c/
 fw/sdkconfig
 fw/sdkconfig.old
 
 # impeccable review captures (regenerated per design pass)
 .impeccable/review/
+hardware/cage/.venv/
+__pycache__/
+hardware/cage/out/

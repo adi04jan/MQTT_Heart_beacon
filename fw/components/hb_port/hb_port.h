@@ -12,7 +12,14 @@
 // Button on CONFIG_HB_BTN_GPIO (0) on both. Rev B also has, not driven by any code yet: GPIO3 USB sense
 // (68k/100k from VBUS, digital), GPIO1 LIS3DH INT1 (deep-sleep wake capable), GPIO8/9 LIS3DH SDA/SCL at 0x19
 // (pull-ups on the breakout). GPIO2 is a strapping pin and stays free on rev B.
-#if CONFIG_HB_HW_B
+#if CONFIG_HB_HW_C
+// Rev C (ESP32_heart_revC3): GPIO1 LIS3DH INT1, GPIO3 USB sense, GPIO2 SCL / GPIO8 SDA, GPIO5 on GND, GPIO20 LED
+// switch (R8 4.7k keeps it off through the ROM's reset-time pull-up). GPIO21 is the ROM's UART TX: it chatters
+// into the pixels' DIN at reset while their rail is off.
+#define HB_HW "C"
+#define HB_LED_GPIO 21  // 9 WS2812-class pixels, GRB, through 330 ohm
+#define HB_BATT_GPIO 4  // ADC1_CH4, 1M/1M divider + 100 nF
+#elif CONFIG_HB_HW_B
 #define HB_HW "B"
 #define HB_LED_GPIO 10  // 9 WS2812-class pixels, GRB, through 330 ohm
 #define HB_BATT_GPIO 4  // ADC1_CH4, 1M/1M divider + 100 nF

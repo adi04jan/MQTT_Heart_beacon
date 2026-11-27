@@ -1,0 +1,3 @@
+# Carrier rev C (ESP32_heart_revC3, single-sided, 2026-11-27): pixels GPIO21, battery GPIO4, LED switch GPIO20.
+# idf.py -C fw -B fw/build-c -D SDKCONFIG=build-c/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.revc" build
+CONFIG_HB_HW_C=y

@@ -138,6 +138,13 @@ class Tick:
 
 
 @dataclass(frozen=True)
+class Connected:
+    """The router (re)connected to the broker: after a broker restart no beacon is connected any more, so the live
+    paths restored from the DB or kept from before are guesses. Drop them and ask every beacon on both paths."""
+    now: int
+
+
+@dataclass(frozen=True)
 class Directory:
     """Users and claimed beacons changed (API / admin): `devs` is [(did, owner, tz)]."""
     users: list[User]
@@ -145,8 +152,14 @@ class Directory:
     now: int
 
 
-def route(ev: Msg | Tick | Directory, st: State) -> list[Pub]:
+def route(ev: Msg | Tick | Directory | Connected, st: State) -> list[Pub]:
     out: list[Pub] = []
+    if isinstance(ev, Connected):
+        for b in st.beacons.values():
+            b.wifi = b.ble = False
+            b.dirty = True
+            _ping(st, b, ev.now, out)
+        return out
     if isinstance(ev, Tick):
         _tick(st, ev.now, out)
         return out
@@ -646,11 +659,12 @@ class Glue:
         if reason.is_failure:
             return
         client.subscribe([(t, 1) for t in SUBS])
+        self.handle(Connected(int(self.clock())))  # publishes the pings itself
         # retained configs survive in the broker's persistence; republishing covers a lost broker DB
         rows = self.db.q("SELECT did, cfg_env FROM device WHERE claimed = 1 AND cfg_env IS NOT NULL")
         self.publish([Pub(f"hb/v1/d/{r['did']}/cfg", r["cfg_env"].encode(), retain=True) for r in rows])
 
-    def handle(self, ev: Msg | Tick | Directory) -> list[Pub]:
+    def handle(self, ev: Msg | Tick | Directory | Connected) -> list[Pub]:
         """Never raises: an exception here would kill paho's network thread or the ticker."""
         try:
             with self.lock:

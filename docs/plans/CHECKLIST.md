@@ -235,6 +235,17 @@ SHA) was found by the new coredump check and erased.
 - [x] Rev B pin map in firmware (2026-11-26, user approved the reviewer's table): Kconfig `HB_HW` A/B, `sdkconfig.revb`,
   LED rail switch on GPIO7 with a 2 s dark hold, divider trim `HB_BATT_DIV_X1000`; both builds clean. Bench: rail logic
   on rev A with `HB_LED_PWR_GPIO=10` (debug log) when the beacon is back on USB; real check on the first rev B board
-- [ ] Board fixes into `ESP32_heart_revB.sch/.brd` + 3D model (hardware reviewer, in progress)
+- [x] Board fixes into `ESP32_heart_revB.sch/.brd` + 3D model (`3d\ESP32_heart_revB.step`, 38.1 x 64.4 x 18.7 mm),
+  KiCad DRC 0 errors / 0 unconnected (2026-11-26). LED rail on BATT+ (user), 330 ohm DIN, CMN3401M / CMN2302BSM
+- [ ] User in EAGLE: open revB sch+brd together, Ratsnest, ERC/DRC; S1 body (bottom) over both LIS3DH socket rows;
+  socket pins reached by top copper only on an unplated board (solder raised, or bottom copper); lift the
+  SuperMini's red PWR LED (0.2-0.4 mA of the ~50-70 uA sleep budget)
 - [ ] LIS3DH use (motion wake on GPIO1, tap gestures): decide what it should do, then the driver
+- [x] Brass cage v2 + print jigs (`hardware/cage/`, `heartcage.py --check` 8/8): 91 x 88 x 46 mm, 1.02 mm brass, 188
+  triangles, 4 strut lengths, 3 A1 mini plates (`out/plate_*.3mf`, not yet opened in Bambu Studio) (2026-11-26)
+- [x] Rev C3 board routed single-sided (2026-11-27): 48 x 37 mm, 0 jumpers, 378 tracks on Top (0.4 / 0.8 mm), GND pour,
+  KiCad DRC at 0.4 / 0.35: 0 errors, 0 unconnected (1 warning: the VSYS wire pad). GPIO map changed (SCL 2, LED switch
+  20, LED data 21), R8 4.7k; firmware `HB_HW_C` builds. Cage --check 8/8 with it
+- [ ] User in EAGLE: open `ESP32_heart_revC3.sch`, run `_build.scr` (or Switch to board, then `_build_from_board.scr`),
+  load `_rules.dru`, DRC; battery 3-pin lead + whether 45 mm includes the BMS; 10 mm switch footprint
 - [ ] H1 [u] Rev B: LED rail load switch on GPIO10 and a 32 kHz crystal (dark draw mA -> uA, BLE on the RTC clock)

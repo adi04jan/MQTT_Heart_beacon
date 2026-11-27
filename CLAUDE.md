@@ -192,6 +192,9 @@ automatically, or `-DHB_MBEDTLS_DIR`).
   GPIO7 (high = on, off after 2 s dark), USB sense GPIO3, LIS3DH INT1 GPIO1 + I2C 8/9 (no driver yet); GPIO2 free
   (strapping). Build rev B: `idf.py -C fw -B fw/build-b -D SDKCONFIG=build-b/sdkconfig -D
   SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.revb" build`. `HB_BATT_DIV_X1000` trims the divider per unit.
+  Rev C = `ESP32_heart_revC3` (48 x 37 mm, single-sided, for the 91 mm brass heart in `hardware/cage/`): pixels GPIO21,
+  LED switch GPIO20 (R8 4.7k against the ROM's reset pull-up), SCL GPIO2, SDA 8, INT1 1, USB sense 3, battery 4;
+  `sdkconfig.revc`, build dir `fw/build-c`. Board generator and router: `hardware/pcb/revc.py`.
 - v1 is retired on v2 units: own partition table (`fw/partitions.csv`, two 1.9 MB OTA slots, no SPIFFS), so a v1 unit
   moves to v2 by one USB flash, not by v1 OTA. COM6's v1 flash backup: `%USERPROFILE%\hb-fw-backup\` (it holds v1
   WiFi credentials; keep it private).

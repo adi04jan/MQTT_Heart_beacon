@@ -7,11 +7,15 @@ menu "Heart Beacon"
             Rev A: the hand-built carrier the deployed beacons use (pixels on GPIO2, battery on GPIO3, LEDs
             always powered). Rev B: the 2026-11 board (ESP32_heart.brd) with the LED load switch, the LIS3DH
             and USB sense. Build it with SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.revb".
+            Rev C: the single-sided 48 x 37 mm board for the 91 mm brass heart (ESP32_heart_revC3), with the GPIO map
+            its routing needed: pixels GPIO21, LED switch GPIO20, SCL GPIO2. sdkconfig.revc.
 
         config HB_HW_A
             bool "Rev A"
         config HB_HW_B
             bool "Rev B"
+        config HB_HW_C
+            bool "Rev C"
     endchoice
 
     config HB_BTN_GPIO
@@ -25,6 +29,7 @@ menu "Heart Beacon"
         int "LED rail load-switch GPIO (high = on), -1 = none"
         range -1 21
         default 7 if HB_HW_B
+        default 20 if HB_HW_C
         default -1
         help
             Rev B: GPIO7 drives Q5, which turns on the P-FET Q6 in the LED rail; R8 keeps it off in reset and

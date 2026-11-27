@@ -457,3 +457,24 @@ def test_phone_mood_glows_the_senders_own_live_beacon_on_any_path():
     relay = only(send(near, "hb/v1/u/alice/up", env("mood", EID, k="custom", rgb="#0a14c8", pat=1)), "hb/v1/u/alice/down")
     assert [r["m"] for r in relay if r["t"] == "relay"] == [
         {"v": 1, "t": "show", "id": EID, "ts": 1000, "k": "custom", "rgb": "#0a14c8", "pat": 1}]
+
+
+def test_a_router_reconnect_forgets_live_paths_and_pings_every_beacon(tmp_path):
+    """2026-11-27: after the deploy restarted the broker, the router restored `wifi: true` from the DB for a beacon
+    that never reconnected; the app showed it awake on WiFi for 17 h and every glow went nowhere. Live flags come
+    from live evidence only: on (re)connect they are dropped and every claimed beacon is asked on both paths."""
+    from hb_server.router import Connected
+    db = Db(str(tmp_path / "hb.db"))
+    db.x("INSERT INTO user (uid, name, pw, mqtt_pass, mqtt_hash) VALUES ('alice', 'Alice', '', '', '')")
+    db.x("INSERT INTO device (did, owner, claimed, registered) VALUES (?, 'alice', 1, 0)", (A,))
+    st = load_state(db, 1000)
+    up(st, A, now=1000)
+    save_state(db, st)
+    st2 = load_state(Db(str(tmp_path / "hb.db")), 2000)
+    pubs = [(p.topic, json.loads(p.payload)) for p in route(Connected(2000), st2)]
+    assert st2.beacons[A].live() is None
+    assert sorted(t for t, m in pubs if m["t"] == "get" or m.get("m", {}).get("t") == "get") == [
+        f"hb/v1/d/{A}/down", "hb/v1/u/alice/down"]
+    assert only(send(st2, "hb/v1/u/alice/up", env("mood", EID, k="heart"), now=2001), f"hb/v1/d/{A}/down") == []
+    up(st2, A, now=2002)  # its answer proves the path again
+    assert st2.beacons[A].live() == "wifi"

@@ -1,0 +1,41 @@
+{
+ "size": [
+  48.0,
+  37.0
+ ],
+ "copper_mm": 474,
+ "rules": {
+  "track": 0.4,
+  "clearance": 0.35,
+  "edge": 1.0
+ },
+ "pinmap": {
+  "A1": "0",
+  "IMU_INT": "1",
+  "SCL": "2",
+  "SDA": "8",
+  "VBAT_SENSE": "4",
+  "USB_CHARGE": "3",
+  "LED_EN": "20",
+  "LED_CTRL": "21"
+ },
+ "jumpers": [],
+ "airwires": [
+  [
+   "GND",
+   [
+    "U1",
+    "5"
+   ],
+   [
+    "C18",
+    "2"
+   ]
+  ]
+ ],
+ "drc_errors": 0,
+ "drc_warnings": [
+  "via_dangling"
+ ],
+ "drc_unconnected": 0
+}
